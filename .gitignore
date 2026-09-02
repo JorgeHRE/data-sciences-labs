@@ -1,0 +1,12 @@
+# Entornos virtuales y cachés
+.venv/
+.ruff_cache/
+.ipynb_checkpoints/
+__pycache__/
+
+# Archivos temporales no deseados
+Untitled.ipynb
+
+# Archivos de datos pesados (si hubiese alguno)
+*.csv
+!tu-entrega/tabla1_caracteristicas_basales.csv
