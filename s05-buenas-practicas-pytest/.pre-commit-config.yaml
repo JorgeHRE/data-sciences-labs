@@ -1,0 +1,38 @@
+# Hooks que se corren solos en cada `git commit` (paso 9 del lab).
+# OJO: este archivo por sí solo no hace nada. En cada clon hay que correr
+# una vez `pre-commit install` para que git lo ejecute (ver README).
+#
+# Cada bloque "repo" dice de dónde descarga pre-commit la herramienta y en
+# qué versión ("rev"). Pre-commit la instala en un entorno AISLADO, aparte
+# de tu .venv, así que todos los que clonen el repo usan la misma versión.
+
+repos:
+  # Ruff: lint (errores y malas prácticas) + formato (estilo visual).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Misma versión que tiene tu .venv (ruff 0.16.8), para que correr ruff a
+    # mano y correrlo desde pre-commit den exactamente el mismo resultado.
+    rev: v0.16.8
+    hooks:
+      # Lint. --fix arregla solo lo que es seguro (ej. ordenar imports); si
+      # arregla algo, el commit se rechaza igual para que revises el cambio.
+      - id: ruff-check
+        args: [--fix]
+      # Formato. Reescribe el archivo con el estilo de ruff; si cambia algo,
+      # también rechaza el commit para que hagas `git add` de nuevo.
+      - id: ruff-format
+
+  # Mypy: revisa que los tipos coincidan con tus anotaciones. Solo avisa,
+  # nunca modifica archivos.
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    # Misma versión que tu .venv (mypy 2.3.1).
+    rev: v2.3.1
+    hooks:
+      - id: mypy
+        # Igual que `files = ["src"]` en pyproject.toml: solo el paquete,
+        # no los tests (los tests no llevan anotaciones de tipos).
+        files: ^src/
+        # El entorno aislado de pre-commit NO tiene lo que está en tu .venv.
+        # Sin los stubs de pandas, mypy no conoce los tipos de pd.DataFrame
+        # y daría errores que en tu .venv no aparecen.
+        additional_dependencies:
+          - pandas-stubs==3.0.5.260914

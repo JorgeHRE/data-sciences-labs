@@ -1,0 +1,61 @@
+# pyproject.toml es el único archivo de config que necesita un paquete moderno:
+# reemplaza a setup.py/setup.cfg y le dice a pip cómo construir e instalar clinlab.
+
+[build-system]
+# setuptools sabe construir paquetes con layout src/ (ver más abajo, [tool.setuptools]).
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clinlab"
+version = "0.1.0"
+description = "Análisis clínico de pacientes Synthea: paquete probado del lab 2."
+requires-python = ">=3.10"
+# Dependencias que el paquete necesita SIEMPRE para funcionar (no para desarrollarlo).
+# pandas es la única por ahora porque las funciones puras del paquete operan sobre DataFrames.
+dependencies = [
+    "pandas",
+]
+
+# "Extras": grupos opcionales de dependencias. [dev] son las que solo necesitas
+# vos, para trabajar en el paquete (testear, formatear, chequear tipos) — no las
+# necesita alguien que solo instale y USE clinlab.
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff==0.16.8",
+    "mypy",
+    "pre-commit",
+    "pandas-stubs",
+    # Bono: pruebas basadas en propiedades (tests/test_propiedades_egfr.py).
+    "hypothesis",
+]
+# [notebook]: solo para abrir y ejecutar notebooks/analisis_pacientes.ipynb.
+# Va aparte de [dev] para que los tests (y el CI) no instalen Jupyter.
+# jupyterlab incluye ipykernel, así que sirve tanto para `jupyter lab` como
+# para VS Code (eligiendo el kernel del .venv).
+# Instalar con: pip install -e ".[dev,notebook]"
+notebook = [
+    "jupyterlab",
+]
+
+[tool.setuptools.packages.find]
+# Le dice a setuptools que el código fuente vive bajo src/, no en la raíz.
+# Esto es justamente lo que hace que "import clinlab" funcione desde cualquier
+# directorio una vez instalado con -e: pip crea un link al paquete real dentro
+# de src/, en vez de depender de que estés parado en la carpeta correcta.
+where = ["src"]
+
+[tool.pytest.ini_options]
+# Le dice a pytest dónde buscar los tests (conftest.py y test_*.py van en tests/).
+testpaths = ["tests"]
+# Opciones que se agregan solas cada vez que corres `pytest` (paso 8 del lab):
+#   --cov=clinlab               mide la cobertura del paquete clinlab (no de los tests)
+#   --cov-report=term-missing   muestra en la terminal el % y las líneas NO cubiertas
+#   --cov-fail-under=80         la corrida falla si la cobertura total baja de 80 %
+addopts = "--cov=clinlab --cov-report=term-missing --cov-fail-under=80"
+
+[tool.mypy]
+# Carpeta que mypy debe revisar cuando corras `mypy src/` (paso 3 del lab).
+files = ["src"]

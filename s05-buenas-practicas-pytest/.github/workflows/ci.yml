@@ -1,0 +1,62 @@
+# Paso 10: la TERCERA capa de calidad.
+#   Capa 1: tests (pytest)       -> los corres tú, cuando te acuerdas.
+#   Capa 2: pre-commit           -> corre solo, pero SOLO en tu máquina (y solo
+#                                   si hiciste `pre-commit install` en ese clon).
+#   Capa 3: CI (este archivo)    -> corre en un servidor de GitHub en cada push,
+#                                   con un clon limpio. No depende de tu .venv
+#                                   ni de que alguien haya instalado pre-commit.
+#
+# Adaptado del workflow del laboratorio 4 (s04-git-github/.github/workflows/ci.yml).
+# GitHub lo encuentra solo porque vive en .github/workflows/ (la ruta importa).
+
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  calidad:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      # 1) Descarga el código del repo en la máquina virtual.
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      # 2) Instala Python.
+      - name: Instalar Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      # 3) Instalar el paquete y sus herramientas.
+      # Se instala el paquete en modo editable con el extra [dev], excluyendo [notebook].
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # 4) Estilo y errores estáticos.
+      # --check en format asegura que falle si hay archivos desalineados sin modificarlos en el runner.
+      - name: Lint con ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+      # 5) Tipos estáticos (Capa 3 independiente de pre-commit local).
+      - name: Chequeo de tipos con mypy
+        run: |
+          mypy src/
+
+      # 6) Tests unitarios y cobertura.
+      # Toma addopts desde pyproject.toml (--cov=clinlab --cov-fail-under=80).
+      - name: Tests con pytest
+        run: |
+          pytest
