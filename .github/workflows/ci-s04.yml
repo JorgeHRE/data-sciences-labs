@@ -1,14 +1,28 @@
-name: CI Pipeline
+# MONOREPO: GitHub solo lee workflows desde .github/workflows/ en la RAÍZ del
+# repo, por eso este archivo vive aquí y no dentro de s04-git-github/.
+# Los pasos se ejecutan dentro de la subcarpeta del laboratorio 4 y el workflow
+# solo se dispara si cambia ese laboratorio (o este mismo archivo).
+
+name: CI s04
 
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - "s04-git-github/**"
+      - ".github/workflows/ci-s04.yml"
   pull_request:
     branches: [ "main" ]
+    paths:
+      - "s04-git-github/**"
+      - ".github/workflows/ci-s04.yml"
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: s04-git-github
 
     steps:
     - name: Checkout repository
