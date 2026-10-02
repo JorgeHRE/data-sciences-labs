@@ -59,3 +59,10 @@ addopts = "--cov=clinlab --cov-report=term-missing --cov-fail-under=80"
 [tool.mypy]
 # Carpeta que mypy debe revisar cuando corras `mypy src/` (paso 3 del lab).
 files = ["src"]
+
+[tool.ruff]
+# Le dice a ruff dónde está el código propio (layout src/) para ordenar bien
+# los imports. Sin esto, al correr ruff desde la raíz del monorepo (pre-commit)
+# no reconoce `clinlab` como paquete propio y reordena los imports distinto
+# a como se ordenan al correrlo desde esta carpeta (CI).
+src = ["src"]

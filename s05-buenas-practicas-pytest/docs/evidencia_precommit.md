@@ -1,6 +1,6 @@
 # Evidencia de pre-commit: commit rechazado → corregido → aceptado
 
-Configuración: `.pre-commit-config.yaml` (ruff-check con `--fix`, ruff-format
+Configuración: `.pre-commit-config.yaml`, hoy en la raíz del monorepo y limitado a este lab (ruff-check con `--fix`, ruff-format
 y mypy sobre `src/`). Hook instalado con `pre-commit install`.
 
 Para generar esta evidencia se hizo un cambio legítimo en

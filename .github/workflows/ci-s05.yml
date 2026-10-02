@@ -7,19 +7,32 @@
 #                                   ni de que alguien haya instalado pre-commit.
 #
 # Adaptado del workflow del laboratorio 4 (s04-git-github/.github/workflows/ci.yml).
-# GitHub lo encuentra solo porque vive en .github/workflows/ (la ruta importa).
 
-name: CI
+# MONOREPO: GitHub solo lee workflows desde .github/workflows/ en la RAÍZ del
+# repo, por eso este archivo vive aquí y no dentro de s05-buenas-practicas-pytest/.
+# Todos los pasos se ejecutan dentro de la subcarpeta del laboratorio 5 y el
+# workflow solo se dispara si cambia ese laboratorio (o este mismo archivo).
+
+name: CI s05
 
 on:
   push:
     branches: ["main"]
+    paths:
+      - "s05-buenas-practicas-pytest/**"
+      - ".github/workflows/ci-s05.yml"
   pull_request:
     branches: ["main"]
+    paths:
+      - "s05-buenas-practicas-pytest/**"
+      - ".github/workflows/ci-s05.yml"
 
 jobs:
   calidad:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: s05-buenas-practicas-pytest
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
@@ -35,6 +48,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
+          cache-dependency-path: s05-buenas-practicas-pytest/pyproject.toml
 
       # 3) Instalar el paquete y sus herramientas.
       # Se instala el paquete en modo editable con el extra [dev], excluyendo [notebook].

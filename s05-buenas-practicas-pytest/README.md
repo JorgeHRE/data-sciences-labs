@@ -10,7 +10,7 @@
   BADGE DEL CI (paso 10): lo primero que se ve es si la suite está en verde.
   Lo genera GitHub Actions a partir de .github/workflows/ci.yml.
 -->
-[![CI](https://github.com/JorgeHRE/s05-buenas-practicas-pytest/actions/workflows/ci.yml/badge.svg)](https://github.com/JorgeHRE/s05-buenas-practicas-pytest/actions/workflows/ci.yml)
+[![CI](https://github.com/JorgeHRE/data-sciences-labs/actions/workflows/ci-s05.yml/badge.svg)](https://github.com/JorgeHRE/data-sciences-labs/actions/workflows/ci-s05.yml)
 
 <!--
   QUÉ ES, en una o dos frases. Quien llega al repo (incluido tu profesor)
@@ -47,8 +47,8 @@ probadas con `pytest`. Entrega del laboratorio **s05-buenas-practicas-pytest**
 Requiere Python 3.10 o superior.
 
 ```bash
-git clone https://github.com/JorgeHRE/s05-buenas-practicas-pytest.git
-cd s05-buenas-practicas-pytest
+git clone https://github.com/JorgeHRE/data-sciences-labs.git
+cd data-sciences-labs/s05-buenas-practicas-pytest
 
 # Entorno virtual: aísla las dependencias de este proyecto.
 python3 -m venv .venv            # en Windows: python -m venv .venv
@@ -67,10 +67,14 @@ pip install -e ".[dev]"
   título y un ⚠️ para que nadie se lo salte ("la trampa clásica").
 -->
 ```bash
+# Desde la RAÍZ del repo (data-sciences-labs/), no desde esta carpeta:
+cd ..
 pre-commit install
 ```
 
-Sin este comando, `.pre-commit-config.yaml` no hace nada: el hook vive en
+Este repo agrupa varios laboratorios, así que el `.pre-commit-config.yaml` está
+en la raíz y sus hooks solo revisan los archivos de este laboratorio.
+Sin ese comando, `.pre-commit-config.yaml` no hace nada: el hook vive en
 `.git/hooks/`, que no se copia al clonar. Una vez instalado, cada `git commit`
 corre automáticamente:
 
@@ -80,7 +84,7 @@ corre automáticamente:
 
 Si algún hook falla o modifica archivos, el commit se rechaza: revisa los
 cambios, vuelve a hacer `git add` y repite el commit. Para revisar todo el
-repo de una vez: `pre-commit run --all-files`.
+repo de una vez: `pre-commit run --all-files` (desde la raíz).
 
 ## Correr los tests
 
