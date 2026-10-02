@@ -1,0 +1,16 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Basura de Python y herramientas
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Archivos de datos pesados
+*.csv
+*.tsv
+*.parquet
