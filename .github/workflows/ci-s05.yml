@@ -21,11 +21,11 @@ on:
     paths:
       - "s05-buenas-practicas-pytest/**"
       - ".github/workflows/ci-s05.yml"
+  # Sin filtro `paths` en pull_request: si el check `calidad` es obligatorio,
+  # tiene que reportarse en TODO PR, aunque no toque s05 (si no, el PR queda
+  # esperando un check que nunca corre y no se puede mergear).
   pull_request:
     branches: ["main"]
-    paths:
-      - "s05-buenas-practicas-pytest/**"
-      - ".github/workflows/ci-s05.yml"
 
 jobs:
   calidad:
