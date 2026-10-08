@@ -71,7 +71,7 @@ def test_unir_con_validacion_tablas_limpias_une_correctamente():
     assert list(resultado.columns) == ["person_id", "visita_id", "edad_anios"]
 
     # ASSERT propiedad 1 (número de filas)
-    assert len(resultado) == 3
+    assert len(resultado) == 7
 
     # ASSERT propiedad 3 (emparejamiento)
     assert resultado["edad_anios"].tolist() == [30, 30, 15]
