@@ -127,6 +127,7 @@ duplicado, visita antes del nacimiento y valores centinela).
 - [`docs/evidencia_rojo_verde.md`](docs/evidencia_rojo_verde.md): pruebas vistas en rojo antes del verde.
 - [`docs/analisis_cobertura.md`](docs/analisis_cobertura.md): análisis de lo cubierto y lo no cubierto.
 - [`docs/evidencia_precommit.md`](docs/evidencia_precommit.md): commit rechazado por pre-commit, corregido y aceptado.
+- [`docs/evidencia_ci.md`](docs/evidencia_ci.md): PR bloqueado por el CI en rojo (require status checks).
 
 ## Uso de IA
 
