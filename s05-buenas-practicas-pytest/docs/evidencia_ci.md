@@ -65,3 +65,9 @@ Este esquema consolida una estrategia de **defensa en profundidad** distribuida 
 
 
 Gracias al ruleset, cualquier omisión local —sea accidental o forzada mediante `--no-verify`— es neutralizada en el servidor remoto: los tests definen de forma objetiva qué constituye un comportamiento correcto y el ruleset impide que entre a `main` una sola línea que no haya superado la suite completa.
+
+## 🟢 PR aprobado
+
+![PR con los checks en verde y el merge habilitado](img/ci_pr_verde.png)
+
+Para comprobar el comportamiento del flujo ante un cambio válido, se abrió un Pull Request que contenía modificaciones exclusivas en la documentación. A pesar de no alterar código, la regla no hace suposiciones ni excepciones: el workflow se disparó obligatoriamente y evaluó la matriz completa. Al terminar sin fallas, la plataforma mostró el mensaje “All checks have passed” (“2 successful checks”) y el botón de merge se puso en verde. Esto demuestra que la regla funciona parejo para cualquier cambio: si algo falla te frena por completo, pero si todo pasa con éxito, te da luz verde para integrar a main.
