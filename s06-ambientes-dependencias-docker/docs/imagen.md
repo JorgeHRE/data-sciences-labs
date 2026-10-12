@@ -24,6 +24,41 @@ Además, enviar cientos de MB innecesarios puede ralentizar drásticamente el pa
 
 ## 1. Lockfile y dependencias transitivas
 
+### Herramienta y comando
+<!-- Qué usaste (uv lock), desde qué carpeta lo corriste y dónde quedó el uv.lock.
+     Incluye cuántos paquetes resolvió. -->
+Se usó `uv` como gestor de paquetes y entornos en Python. Se corrió desde la carpeta `s05-buenas-practicas-pytest`, y ahí mismo quedó el archivo `uv.lock`.
+
+`uv lock` resolvió 135 paquetes.
+
+### Por qué es determinista
+<!-- En 2-3 líneas: qué fija el lockfile que el pyproject.toml no fija
+     (versiones exactas y hashes). -->
+El pyproject.toml solo define dependencias directas sin fijar versión (ej. pandas), mientras que el lockfile fija las versiones exactas de todo el árbol (incluyendo dependencias transitivas), sus hashes criptográficos de integridad y la resolución exacta por plataforma/arquitectura.
+
+### Tres dependencias transitivas
+<!-- Una tabla o lista con: transitiva | directa de la que viene | cadena. -->
+| Transitiva | La trae | Cadena |
+| :--- | :--- | :--- |
+| numpy | pandas | clinlab → pandas → numpy |
+| python-dateutil | pandas | clinlab → pandas → python-dateutil |
+| arrow | jupyterlab | clinlab →(extra notebook)→ jupyterlab →<br>jupyter-server → jupyter-events → jsonschema →<br>isoduration → arrow |
+
+### Por qué el .venv pesa 290 MB
+<!-- Tu respuesta a la pregunta pendiente. Pistas: cuántos paquetes tiene
+     el lock y qué extras instalaste en ese .venv. -->
+El archivo tiene ese peso debido a que incluye librerías como numpy o pandas que están compiladas en otros lenguajes de programación (como C, C++ o Rust), las cuales son extremadamente pesadas, llegando a pesar para este caso concreto 140 MB.
+
+Se incluyen diferentes herramientas como mypy, pesando bastante (54 MB). pip pesa unos 16 MB y finalmente el resto de paquetes consume cerca de 80 MB repartidos entre pytest, ruff, hypothesis, virtualenv, pre-commit.
+
+Herramientas como mypy, pytest, ruff o hypothesis provienen exclusivamente del extra dev y no forman parte del núcleo de clinlab; cargarlas en el entorno es la razón directa de que el .venv duplique su peso con utilidades que solo sirven para desarrollar y no para ejecutar.
+
+Consecuencia para Docker: Instalar dependencias de desarrollo en el contenedor genera una imagen innecesariamente pesada, más lenta de construir y desplegar, y con una mayor superficie de vulnerabilidades de seguridad.
+
+### Moraleja
+<!-- 2-3 líneas con tus palabras. -->
+El lockfile resuelve el universo completo de dependencias y plataformas posibles, pero el .venv y la imagen de producción solo deben materializar lo indispensable para su entorno específico; distinguir entre dependencias de runtime y de desarrollo evita que las librerías transitivas inflen el peso del contenedor y del disco sin aportar valor funcional.
+
 ## 2. Orden malo del Dockerfile
 
 ## 3. Orden bueno y tabla comparativa
