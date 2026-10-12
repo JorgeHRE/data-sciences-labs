@@ -61,6 +61,23 @@ El lockfile resuelve el universo completo de dependencias y plataformas posibles
 
 ## 2. Orden malo del Dockerfile
 
+Para evaluar el impacto de la invalidación de la caché en esta estructura, se cronometraron dos ejecuciones con comandos distintos:
+
+1. **Construcción inicial desde cero (19.9 s):** Se forzó a ignorar cualquier caché previa mediante la opción `--no-cache`:
+   ```bash
+   time docker build --no-cache -f s06-ambientes-dependencias-docker/Dockerfile -t clinlab:malo .
+   ```
+2. **Reconstrucción tras cambio en código (17.7 s):** Tras agregar únicamente un comentario al código fuente (`src/clinlab/`), se ejecutó permitiendo el uso normal de caché:
+   ```bash
+   time docker build -f s06-ambientes-dependencias-docker/Dockerfile -t clinlab:malo .
+   ```
+
+ Cabe destacar que para una medición justa y honesta, la imagen base (`python:3.12-slim`) ya se encontraba previamente descargada en el sistema local, por lo que ese tiempo no incluye la descarga inicial de capas base.
+
+Al hacer el rebuild, Docker sí aprovechó la caché en las primeras dos capas (`WORKDIR` marcó `CACHED`). Sin embargo, el mecanismo se rompió inmediatamente en la tercera instrucción (`COPY s05-buenas-practicas-pytest/ ./`) al detectar la modificación del archivo, arrastrando consigo en cascada a `RUN pip install --no-cache-dir .`.
+
+Como consecuencia, el rebuild tardó apenas ~2 s menos que compilar desde cero (17.7 s vs. 19.9 s): la caché prácticamente no ayudó, ya que el paso más costoso en tiempo y descarga volvió a ejecutarse por completo.
+
 ## 3. Orden bueno y tabla comparativa
 
 ## 4. Tamaño de la imagen
