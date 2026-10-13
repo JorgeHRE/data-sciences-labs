@@ -393,4 +393,71 @@ Un escáner de vulnerabilidades te dice estrictamente **qué** hay instalado en 
 
 ## 9. Pruebas dentro del contenedor
 
+### El problema inicial: dependencias ocultas
+La primera ejecución de validación en la imagen de producción (`docker run --rm clinlab:final pytest`) falló inmediatamente con el error `exec: "pytest": executable file not found in $PATH`. 
+
+Para lograr ejecutar las pruebas en aislamiento, había tres cosas que resolver en la configuración:
+1. **Instalación de producción estricta:** El Dockerfile instala las dependencias usando `uv sync --frozen --no-dev`. Herramientas como `pytest`, `pytest-cov` e `hypothesis` residen en la sección `[project.optional-dependencies]` (el *extra* `dev`), por lo que fueron correctamente excluidas.
+2. **Configuración acoplada:** El archivo `pyproject.toml` tiene configurado por defecto `addopts = "--cov=clinlab --cov-fail-under=80"`. Se deduce que intentar ejecutar `pytest` en un entorno que no tenga instalado `pytest-cov` provocaría un error fatal de configuración.
+3. **El contexto bloqueado:** El `.dockerignore` configurado como lista blanca en la actividad 5 estaba bloqueando la copia de la carpeta `tests/`.
+
+### Decisión de diseño: Un stage dedicado a pruebas
+Dado que la imagen de producción debe mantenerse libre de herramientas de desarrollo, se evaluaron dos caminos para ejecutar las pruebas:
+
+| Opción | Cómo se implementa | Ventaja | Costo / Desventaja |
+| :--- | :--- | :--- | :--- |
+| **A. Otro Dockerfile** | Un archivo `Dockerfile.test` separado. | Separación física total de los entornos. | Repite la construcción desde cero y no comparte la caché de capas. |
+| **B. Otro stage (Elegida)** | Un bloque `FROM builder AS test` dentro del mismo archivo, construido con `--target test`. | Reutiliza las capas pesadas del `builder` (uv, lockfile, dependencias base). | El Dockerfile crece en complejidad. |
+
+**La trampa arquitectónica evitada:** Si se construye un `Dockerfile` sin especificar `--target`, Docker compila automáticamente hasta el último *stage* del archivo. Para evitar que un build estándar empaquetara las pruebas, la etapa `test` se insertó en el medio. El flujo quedó como `builder` → `test` → `final`, asegurando que la imagen resultante por defecto siga siendo la de producción. Además, al pedir la imagen final, BuildKit es lo suficientemente inteligente para omitir la compilación del stage `test`; la lista de pasos del build demuestra que solo se ejecutan las instrucciones del `builder` y de la etapa final.
+
+### Cambios implementados y proceso iterativo
+
+**1. Ajustes en el Dockerfile:**
+* Se nombró explícitamente a la primera etapa `FROM python:3.12-slim AS builder`.
+* Se insertó la nueva etapa de pruebas tomando el builder como base:
+  ```dockerfile
+  FROM builder AS test
+  RUN uv sync --frozen --extra dev
+  COPY s05-buenas-practicas-pytest/tests/ ./tests/
+  ENV PATH="/app/.venv/bin:$PATH"
+  CMD ["pytest"]
+  ```
+* En la etapa final de producción, la instrucción de copia se actualizó para referenciar el nombre correcto: `COPY --from=builder ...`.
+
+**2. Ajustes en el `.dockerignore`:**
+Se añadió la regla `!s05-buenas-practicas-pytest/tests` (sin barra al final) en el segundo bloque de la lista blanca (justo debajo de `src/` y antes de la re-exclusión de cachés), permitiendo que el comando `COPY` de la etapa de pruebas encuentre los archivos.
+
+*Notas de iteración:* Llegar a la sintaxis correcta requirió corregir varios errores comunes, como omitir el alias `AS builder` en el primer `FROM` (lo que causaba un fallo de referencia), insertar la etapa `test` al final del archivo por accidente, intentar usar la sintaxis de Docker dentro del `.dockerignore`, y escribir erróneamente `uv --frozen --extra dev sync` (colocar los flags antes del subcomando arroja el error `unexpected argument '--frozen' found` junto a la sugerencia `sync --frozen exists`).
+
+### Evidencia y resultados
+
+Se construyó la etapa de pruebas de forma explícita y se ejecutó el contenedor:
+
+```bash
+docker build -f s06-ambientes-dependencias-docker/Dockerfile --target test -t clinlab:test .
+docker run --rm clinlab:test
+```
+
+* **Éxito en ejecución:** Los 39 tests pasaron en 1.22 s (usando `pytest 9.1.1`, Python 3.12.15, `hypothesis` y `pytest-cov`).
+* **Cobertura:** 100 % (57 sentencias), superando el mínimo exigido del 80 %.
+* **Velocidad de construcción:** La capa `uv sync --extra dev` instaló 28 paquetes adicionales en apenas 3.5 s. Esta velocidad se debe a la eficiencia inherente de `uv`, ya que la capa no estaba en caché y se ejecutó realmente.
+* **Tamaños:** La imagen `clinlab:test` pesa **539 MB**, mientras que `clinlab:final` se mantiene intacta en **307 MB** y arranca exitosamente ejecutando `import clinlab` como el usuario restringido `appuser`.
+* **Aislamiento comprobado:** Ejecutar `docker run --rm clinlab:final pytest` en la imagen de producción sigue fallando por no encontrar el ejecutable, confirmando que las herramientas de desarrollo no se filtraron.
+
+### Hallazgos clave descubiertos por el contenedor
+
+1. **La dependencia oculta del entorno local:** En la máquina anfitriona, los tests pasaban sin problema porque las herramientas estaban instaladas en el entorno local. El contenedor expone y documenta estas dependencias forzando a declararlas explícitamente (`extra dev`).
+2. **Dependencias transitivas implícitas:** Los tests (`test_auditoria.py`, `test_preprocesamiento.py`) importan explícitamente `import numpy as np`, pero `pyproject.toml` solo declara a `pandas`. Los tests pasan únicamente porque `pandas` arrastra a `numpy` como dependencia transitiva. Si `pandas` dejara de depender de `numpy` en el futuro, la suite de pruebas fallaría sin aviso (aunque la aplicación en sí no se vería afectada).
+3. **El peso real del entorno de desarrollo:** El grupo `dev` no solo contiene herramientas de prueba, sino también `mypy`, `ruff`, `pre-commit` y `pandas-stubs`. Esto explica exactamente los 232 MB de diferencia entre la imagen de pruebas (539 MB) y la de producción (307 MB).
+4. **Modo editable frente a paquete instalado:** Al ejecutar `uv sync --extra dev` (sin el flag `--no-editable`), `uv` reinstaló `clinlab` en modo editable dentro del entorno de pruebas. Como resultado, `clinlab:test` importa el código directamente desde `/app/src/clinlab/`, mientras que en la imagen de producción se lee la versión instalada en `/app/.venv/lib/python3.12/site-packages/clinlab/`.
+
+### Salvedades y puntos ciegos
+
+* **La suite no valida la imagen final:** Los tests se ejecutan en una imagen paralela (`clinlab:test`). La validación real de la imagen de producción se limita a un simple *smoke test* (`import clinlab`).
+* **Riesgo de empaquetado:** Dado el punto 4 de los hallazgos, un error en la configuración de construcción (por ejemplo, olvidar incluir un archivo en el *wheel*) pasaría todas las pruebas en la etapa `test` (porque lee de `src/`), pero rompería la aplicación en producción. Esto podría mitigarse usando `--no-editable` también en la etapa de pruebas.
+* **El espejismo del 100 % de cobertura:** Lograr un 100 % significa que la ejecución de las pruebas tocó las 57 sentencias del paquete, pero no es una garantía absoluta de la calidad de los tests.
+
+**Moraleja:** El famoso "funciona en mi máquina" casi siempre esconde dependencias globales que nadie declaró. Una imagen de pruebas separada las saca a la luz de inmediato, al mismo tiempo que permite mantener la imagen de producción pequeña y sin herramientas de desarrollo.
+
 ## 10. Publicación en ghcr.io
