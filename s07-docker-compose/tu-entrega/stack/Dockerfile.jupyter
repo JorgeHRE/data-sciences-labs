@@ -1,0 +1,16 @@
+# Imagen de Jupyter para el stack clínico.
+# Parte de la imagen oficial más ligera y le añade lo que el notebook necesita
+# para hablar con Postgres. Así las dependencias quedan escritas aquí y no hay
+# que hacer "pip install" a mano cada vez que se recrea el contenedor.
+
+# Etiqueta con fecha (no "latest"): todos construyen sobre la misma base.
+FROM quay.io/jupyter/base-notebook:2026-10-12
+
+# psycopg[binary]: driver de Postgres con las librerías de C ya incluidas
+#                  (no hace falta instalar libpq en el sistema).
+# sqlalchemy:      capa estándar para abrir conexiones desde Python y pandas.
+# pandas:          lo usaremos para consultar y analizar las tablas.
+RUN pip install --no-cache-dir \
+    "psycopg[binary]" \
+    sqlalchemy \
+    pandas
