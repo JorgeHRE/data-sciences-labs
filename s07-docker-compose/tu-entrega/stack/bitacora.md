@@ -265,3 +265,53 @@ Docker Compose solo "ve" los servicios que pertenecen a los perfiles activos en 
 **La solución:**
 Debes usar la misma bandera de perfil tanto para levantar como para destruir el entorno. Ejecutar `docker compose --profile dev down` le indica a Compose que incluya a Adminer en la orden de limpieza, eliminando su contenedor y, ahora sí, liberando y borrando la red exitosamente.
 
+
+## Actividad 8 — Depurar a propósito
+
+### Cómo se rompió
+
+Cambié `POSTGRES_PASSWORD` **solo en `.env`** (un único lugar) con el volumen `pgdata` ya creado, y ejecuté `docker compose up -d`.
+
+- Compose recreó **los dos** contenedores (`db` y `jupyter`), porque la variable cambió en ambos.
+- Postgres solo lee `POSTGRES_PASSWORD` al crear el volumen. Como el volumen ya tenía datos, **la base conservó la clave vieja** y Jupyter recibió la nueva.
+
+### Paso 1 — `docker compose ps`
+
+```text
+stack-db-1        Up 20 seconds (healthy)
+stack-jupyter-1   Up 15 seconds (healthy)
+```
+
+Ambos contenedores aparecieron como `healthy`. `pg_isready` solo comprueba que Postgres acepta conexiones; no autentica ni valida ninguna clave. Por eso el healthcheck marca `healthy` aunque la clave de Jupyter sea incorrecta: `ps` es ciego a este tipo de fallo.
+
+### Paso 2 — `docker compose logs <servicio>`
+
+- `logs jupyter`: solo el arranque normal del servidor (token, URL). Nada de error: Jupyter no se conecta a la base hasta que el notebook lo intenta.
+- `logs db`:
+
+```text
+FATAL:  password authentication failed for user "clinico"
+DETAIL:  Connection matched file ".../pg_hba.conf" line 128: "host all all all scram-sha-256"
+```
+
+El error está en el **servidor** de la base, no en el cliente. Al revisar los logs, la asimetría fue evidente:
+- **El cliente calló:** `docker compose logs jupyter` no mostró ninguna línea de error. La conexión la abre el notebook cuando se ejecuta una celda, así que el servicio no registra nada; el error solo se ve en la salida (traceback) de quien intenta conectar.
+- **El servidor habló:** `docker compose logs db` registró un `FATAL: password authentication failed for user "clinico"` por cada intento de conexión.
+
+### Paso 3 — `docker compose exec <servicio> ...`
+
+- `exec jupyter`: `PGHOST=db`, `PGUSER=clinico`, `PGPASSWORD` de 26 caracteres que empieza por `clave…` → el valor **nuevo**.
+- `exec db`, conectando por red (`-h db`, la ruta de Jupyter): la clave **nueva** falla con `password authentication failed`; la **vieja** entra.
+- Trampa: con `-h 127.0.0.1` o por socket Unix, `psql` entra **sin pedir clave**, porque `pg_hba.conf` tiene reglas `trust` para localhost y socket. Esa prueba no demuestra nada sobre la clave.
+
+### Diagnóstico final
+
+`.env` y la base quedaron desincronizados: Jupyter envía una clave que Postgres no tiene guardada, porque Postgres fijó la suya al crear el volumen. Cuando Compose recreó los contenedores, el servicio `jupyter` adoptó la nueva contraseña en su variable `PGPASSWORD` y empezó a usarla para intentar conectarse. Sin embargo, la imagen de Postgres tiene una regla estricta: **solo lee `POSTGRES_PASSWORD` la primera vez que inicializa un directorio de datos vacío**. Como el volumen `pgdata` ya existía e intacto, Postgres ignoró la nueva variable de entorno y siguió exigiendo la contraseña original.
+
+**Dos formas de arreglarlo:**
+1. Revertir `.env` al valor con el que se creó el volumen (no pierde datos).
+2. Hacer que la base adopte la clave nueva: `docker compose down -v` y volver a levantar (**borra los datos**), o cambiarla sin perder datos con `ALTER USER clinico PASSWORD '...'` dentro de la base.
+
+### Arreglo aplicado
+
+Revertí `.env` al valor original y ejecuté `up -d`: `ps` mostró ambos `healthy` y la conexión desde Jupyter volvió a funcionar.
