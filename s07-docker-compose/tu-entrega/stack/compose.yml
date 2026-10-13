@@ -15,6 +15,10 @@ services:
     volumes:
       # Volumen con nombre: los datos sobreviven a "down" (no a "down -v").
       - pgdata:/var/lib/postgresql/data
+      # Scripts de inicialización: se ejecutan en orden alfabético y SOLO si el
+      # volumen está vacío (primer arranque). ":ro" = solo lectura para el
+      # contenedor; no necesita modificar tus scripts.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
     ports:
       # Actividad 2: se publica para conectarme desde mi máquina (fuera de
       # Docker), pero SOLO en el loopback. Entre contenedores no hace falta:

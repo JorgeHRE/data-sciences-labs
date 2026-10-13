@@ -23,7 +23,7 @@ maliciosas que usen el navegador para llegar a localhost, vulnerabilidades de
 Adminer en sí, y contraseñas débiles. Por eso: contraseña larga y, en la
 actividad 7, Adminer pasará a un perfil para que no esté siempre encendido.
 
-**Pendiente:** Postgres se publicará en `127.0.0.1:5432` en la actividad 2, que
+**Después:** en la actividad 2 se publicó Postgres en `127.0.0.1:5432`, porque
 exige conectarse desde fuera de Docker.
 
 ### Evidencia
@@ -91,3 +91,32 @@ la red interna de Docker, ni tiene acceso a su DNS.
 
 - `ss -ltn`: los tres puertos (8080, 8888, 5432) escuchan en `127.0.0.1`.
 - Jupyter sin token responde 403; con token, 200.
+
+## Actividad 3 — Inicializar la base
+
+### Qué se añadió
+
+- Carpeta `initdb/` montada en `/docker-entrypoint-initdb.d` (solo lectura):
+  - `01-esquemas.sql`: crea los esquemas `cdm` y `results`.
+  - `02-tablas-prueba.sql`: crea `cdm.person` (subconjunto de columnas de la tabla
+    `person` de OMOP, con datos inventados) y `results.conteo_pacientes`.
+- Los prefijos numéricos importan: Postgres ejecuta los scripts en orden
+  alfabético, y los esquemas tienen que existir antes que las tablas.
+
+### Experimento: modificar un script y volver a hacer `up`
+
+| Paso | Qué hice | Qué vi |
+|---|---|---|
+| 1 | `down -v` + `up -d` (volumen vacío) | Los logs mostraron la ejecución de los scripts. En Adminer aparecieron los esquemas creados y la tabla original con las primeras filas. |
+| 2 | Añadí la fila `(5, 8532, 1990)` a `02-tablas-prueba.sql` y `up -d` | Docker Compose indicó que el contenedor estaba actualizado (Running / Up to date). No hubo cambios en la base de datos. |
+| 3 | `up -d --force-recreate db` y `logs db` | PostgreSQL Database directory appears to contain a database; Skipping initialization |
+| 4 | Consulté `cdm.person` | La fila 5 no estaba. La tabla seguía teniendo únicamente las filas originales. |
+| 5 | `down -v` + `up -d` | La tabla ahora sí mostró la nueva fila (5), sumando el total esperado. |
+
+### ¿Se aplicó el cambio? ¿Por qué?
+
+No se aplicó tras el paso 2 ni el paso 3. Esto ocurre porque la imagen de Postgres evalúa el directorio de datos montado en el volumen (/var/lib/postgresql/data); si detecta que la base de datos ya fue inicializada previamente (el volumen no está vacío), omite por completo la lectura de la carpeta /docker-entrypoint-initdb.d/. Recrear el contenedor no sirve de nada si el volumen subyacente sigue intacto.
+
+### ¿Qué hace falta para que se aplique?
+
+Hace falta destruir el volumen persistente mediante la bandera -v (ej. docker compose down -v) para que, al volver a arrancar, el directorio de datos esté vacío y se vuelva a disparar el proceso de inicialización. Lo que se pierde al hacer esto es absolutamente toda la información y estado de la base de datos: es un borrón y cuenta nueva, destruyendo cualquier dato que se haya insertado o modificado manualmente después de la primera creación.
