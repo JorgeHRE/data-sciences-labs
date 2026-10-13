@@ -1,0 +1,90 @@
+# .github/workflows/publish-s06.yml
+#
+# Flujo de Entrega Continua (CD) para publicar imágenes de Docker.
+
+
+name: Publish s06
+
+on:
+  push:
+    branches: ["main"]
+    # Solo dispara la publicación si cambian los archivos que afectan a la imagen
+    paths:
+      - "s06-ambientes-dependencias-docker/Dockerfile"
+      - ".dockerignore"
+      - "s05-buenas-practicas-pytest/**"
+      - ".github/workflows/publish-s06.yml"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Permisos explícitos que GitHub necesita para publicar en tu ghcr.io
+    permissions:
+      contents: read      # Necesario para que actions/checkout pueda leer el código
+      packages: write     # Necesario para autorizar el push de las imágenes
+
+    steps:
+      # 1) Descarga el código del repositorio en la máquina virtual.
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      # 2) Trampa de ghcr.io evitada: El registro rechaza nombres con mayúsculas.
+      # Tu usuario (JorgeHRE) fallaría. Usamos bash (,,) para pasarlo a minúsculas.
+      - name: Formatear nombre de usuario a minúsculas
+        run: echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
+      # 3) Autenticación en el registro de GitHub usando el token automático.
+      - name: Login a GitHub Container Registry (ghcr.io)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 4) Configura el motor avanzado de construcción de Docker.
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 5) La acción oficial de Docker genera las etiquetas automáticamente.
+      # Etiquetas de Producción: 0.1.0 y el SHA corto del commit.
+      - name: Extraer metadatos para imagen de Producción
+        id: meta_prod
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.REPO_OWNER }}/clinlab
+          tags: |
+            type=raw,value=0.1.0
+            type=sha,format=short
+
+      # Etiquetas de Pruebas: 0.1.0 y el SHA corto del commit.
+      - name: Extraer metadatos para imagen de Pruebas
+        id: meta_test
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.REPO_OWNER }}/clinlab-test
+          tags: |
+            type=raw,value=0.1.0
+            type=sha,format=short
+
+      # 6) Construir y subir la imagen de Producción.
+      # Al NO pasar un 'target', Docker construye hasta el final del archivo.
+      - name: Build y push de imagen de Producción
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: s06-ambientes-dependencias-docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta_prod.outputs.tags }}
+          labels: ${{ steps.meta_prod.outputs.labels }}
+
+      # 7) Construir y subir la imagen de Pruebas.
+      # Al pasar 'target: test', Docker reutiliza el builder y se detiene en el test.
+      - name: Build y push de imagen de Pruebas
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: s06-ambientes-dependencias-docker/Dockerfile
+          target: test
+          push: true
+          tags: ${{ steps.meta_test.outputs.tags }}
+          labels: ${{ steps.meta_test.outputs.labels }}
