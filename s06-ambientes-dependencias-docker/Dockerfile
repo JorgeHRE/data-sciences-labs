@@ -22,11 +22,18 @@ RUN uv sync --frozen --no-dev --no-editable
 #etapa 2: Imagen final de ejecución
 FROM python:3.12-slim
 WORKDIR /app
+
+
+RUN useradd -m appuser
+
 # Traer únicamente el entorno virtual ya construido desde la etapa anterior
-COPY --from=0 /app/.venv /app/.venv
+COPY --from=0 --chown=appuser:appuser /app/.venv /app/.venv
 
 # 8. Activar el entorno virtual para tiempo de ejecución
 ENV PATH="/app/.venv/bin:$PATH"
+
+#Usuario no root para seguridad
+USER appuser
 
 # 9. Comando por defecto al iniciar el contenedor
 CMD ["python", "-c", "import clinlab"]
