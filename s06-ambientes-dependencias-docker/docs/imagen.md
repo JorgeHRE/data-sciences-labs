@@ -201,6 +201,65 @@ El objetivo del enunciado era dejar la imagen por debajo de 500 MB; el resultado
 Optimizar el peso de una imagen de Docker exige medir en lugar de asumir: más del 90 % del ahorro total provino de dos decisiones básicas —elegir la imagen base adecuada (−1 423 MB) y excluir el entorno local con `.dockerignore` (−416 MB)—, mientras que patrones más complejos como el *multi-stage* solo aportan valor real cuando la etapa de construcción introduce peso extra que no pertenece a producción (como el binario de `uv`).
 ## 5. `.dockerignore` y contexto
 
+### Cómo se midió el contexto
+
+Para medir el tamaño real del contexto enviado al demonio de Docker se ejecutó la construcción desactivando BuildKit desde la raíz del repositorio:
+
+```bash
+DOCKER_BUILDKIT=0 docker build -f s06-ambientes-dependencias-docker/Dockerfile -t clinlab:final .
+```
+
+El flag `DOCKER_BUILDKIT=0` es necesario porque fuerza el uso del builder clásico, el cual empaqueta todo el directorio y muestra en su primera línea (`Sending build context to Docker daemon...`) el peso total transferido. El constructor por defecto (BuildKit) solo transfiere archivos de manera incremental según los `COPY` del Dockerfile y no sirve para medir el volumen total del contexto.
+
+---
+
+### Contexto antes y después
+
+| Dato | Valor |
+| :--- | :--- |
+| **Contexto antes (sin exclusiones, builder clásico)** | **337.2 MB** (`Sending build context to Docker daemon`, `DOCKER_BUILDKIT=0`) |
+| **Contexto después (`.dockerignore` de lista blanca)** | **716.3 kB** (reducción de ~99.8 %) |
+| **Archivos que llegan al contexto** | **8** (casi todo el peso corresponde a `uv.lock` con ~690 kB; el código fuente ocupa unas decenas de kB) |
+| **Estado de la imagen final** | **308 MB** (antes 307 MB; arranca con código 0 y la diferencia de 1 MB es ruido de medición sin cambio de contenido) |
+
+#### Lo que se enviaba sin querer en los 337.2 MB
+
+Al ejecutar el build desde la raíz del monorepo sin reglas de exclusión, Docker empaquetaba y enviaba en el contexto directorios y cachés que `clinlab` no necesita para construirse:
+
+* **`s05-buenas-practicas-pytest/` (309 MB en total):** Incluye el entorno virtual `.venv/` (290 MB), `.mypy_cache/` (18 MB) y el resto de archivos (~1 MB, dentro de los cuales están los 716.3 kB de `pyproject.toml`, `uv.lock` y `src/` que sí requiere la imagen).
+* **`.mypy_cache/` de la raíz (18 MB):** Caché de verificación de tipos generada en la raíz del monorepo.
+* **`Lab3/` (8 MB):** Carpeta de otra práctica que por sí sola aportaba más peso al contexto que el propio historial de Git.
+* **`.git/` (7 MB):** Historial de commits y objetos del repositorio.
+* **`.ruff_cache/`, `Lab2/`, `s04-git-github/`, `s06-ambientes-dependencias-docker/`, `.github/` y archivos sueltos (~1 MB o menos cada uno):** Cachés adicionales, prácticas previas, los propios Dockerfiles de prueba y archivos de configuración de la raíz (`.pre-commit-config.yaml`, `README.md`).
+
+En conjunto, la suma de estos directorios explica el tamaño total del contexto inicial: 309 + 18 + 8 + 7 + el resto ≈ **337 MB** (337.2 MB medidos con el builder clásico).
+
+---
+
+### La decisión de diseño: Opción C (lista blanca en la raíz + archivos vacíos)
+
+Para cumplir con el estándar de tener un `.dockerignore` en la raíz sin arruinar los experimentos de la sección 4, se evaluaron tres alternativas:
+* **Opción A (`.dockerignore` solo en la raíz):** Es el estándar compatible con todos los builders y sistemas de CI, pero afectaría también a las variantes `0-ingenuo`, `1-slim` y `2-nocache`, que dejarían de ser construcciones «sin exclusiones».
+* **Opción B (mantener solo `<Dockerfile>.dockerignore` por archivo):** No altera los experimentos, pero depende exclusivamente de BuildKit y no reduce el contexto con el builder antiguo.
+* **Opción C (elegida — `.dockerignore` en la raíz + archivos vacíos para las variantes 0–2):** Se creó un `.dockerignore` en la raíz estructurado como **lista blanca** (excluyendo todo con `*`, des-excluyendo únicamente `!s05-buenas-practicas-pytest/pyproject.toml`, `!s05-buenas-practicas-pytest/uv.lock` y `!s05-buenas-practicas-pytest/src/`, y volviendo a excluir cachés al final) y se añadieron tres archivos vacíos (`Dockerfile.0-ingenuo.dockerignore`, `Dockerfile.1-slim.dockerignore` y `Dockerfile.2-nocache.dockerignore`). Así se entrega un archivo estándar en la raíz y, al mismo tiempo, las variantes 0–2 conservan su reproducibilidad en BuildKit a cambio de mantener tres archivos vacíos adicionales.
+
+---
+
+### Hallazgos durante la implementación
+
+1. **Diferencia entre BuildKit y el builder clásico con `<Dockerfile>.dockerignore`:**
+   * Al medir `Dockerfile.3-ignore` (que tenía su propio `Dockerfile.3-ignore.dockerignore`) usando `DOCKER_BUILDKIT=0`, el contexto enviado siguió siendo de **337.2 MB**, mientras que en BuildKit sí había bajado a **3.02 kB**.
+   * Esto reveló que los archivos con nombre `<Dockerfile>.dockerignore` solo los lee **BuildKit**. El builder clásico busca únicamente un archivo llamado `.dockerignore` en la raíz del contexto. Como consecuencia, el truco de la Opción C (usar un `Dockerfile.N.dockerignore` vacío para pisar al `.dockerignore` de la raíz) funciona en BuildKit, pero con el builder clásico el archivo vacío es ignorado y prevalece el `.dockerignore` de la raíz.
+2. **El artefacto `egg-info` infiltrado dentro de `src/`:**
+   * Aunque la lista blanca del `.dockerignore` solo abría paso a `pyproject.toml`, `uv.lock` y `src/`, la primera medición dejó pasar los metadatos generados en `src/clinlab.egg-info/` porque vivían dentro de una carpeta permitida (`!s05-buenas-practicas-pytest/src/`).
+   * Como en `.dockerignore` gana la última regla que coincide, fue necesario agregar explícitamente `**/*.egg-info` en el tercer bloque (junto a `**/__pycache__` y `**/*.pyc`) para volver a excluir esos artefactos, dejando el contexto en los **716.3 kB** finales (8 archivos).
+
+---
+
+### Moraleja
+
+En un monorepo, escribir un `.dockerignore` como lista blanca (`*` seguido de excepciones con `!`) es mucho más seguro y fácil de mantener que una lista negra interminable, pero exige recordar dos reglas: que abrir una carpeta como `src/` también deja entrar los artefactos ocultos que se generen dentro de ella (`__pycache__`, `*.egg-info`), y que las funciones avanzadas como `<Dockerfile>.dockerignore` dependen de BuildKit y son ignoradas por el builder clásico.
+
 ## 6. Usuario no-root
 
 ## 7. Secretos en capas
