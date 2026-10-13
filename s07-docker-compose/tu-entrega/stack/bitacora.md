@@ -44,3 +44,50 @@ Adminer conectado a la base `clinico` (System: PostgreSQL, Server: `db`):
   vacío, no se perdió nada). Con datos reales esto sería destructivo.
 - **Otro error:** el campo *System* de Adminer venía en MySQL por defecto; hay
   que cambiarlo a PostgreSQL.
+
+## Actividad 2 — Los servicios se hablan por nombre
+
+### Qué se añadió
+
+- Servicio `jupyter`, construido con `Dockerfile.jupyter`: imagen oficial
+  `quay.io/jupyter/base-notebook:2026-10-12` + `psycopg[binary]`, `sqlalchemy` y
+  `pandas`. Así las dependencias quedan escritas y no hay que hacer `pip install`
+  a mano cada vez que se recrea el contenedor.
+- Jupyter publicado solo en `127.0.0.1:8888` y protegido con token (`.env`).
+- Postgres publicado ahora en `127.0.0.1:5432`: es lo que permite conectarme
+  desde fuera de Docker. Sigue sin estar abierto a la red.
+- La contraseña llega al notebook por variables de entorno (`PGHOST`, `PGUSER`,
+  `PGPASSWORD`...), no escrita en el `.ipynb`.
+
+### Las dos cadenas de conexión
+
+| Desde dónde | Host | Cadena (sin contraseña) |
+|---|---|---|
+| Notebook (dentro de Docker) | `db` | `postgresql+psycopg://clinico:<clave>@db:5432/clinico` |
+| Mi máquina (fuera de Docker) | `127.0.0.1` | `postgresql+psycopg://clinico:<clave>@127.0.0.1:5432/clinico` |
+
+Comprobado: las dos devuelven la base `clinico` y llegan al mismo servidor
+(`172.19.0.2`). Desde mi máquina, `db` no se resuelve (`getent hosts db` no
+devuelve nada).
+
+### Evidencia
+
+Notebook dentro de Docker (host `db`):
+
+![Notebook conectado a db](evidencia/jupyter-conexion-db.png)
+
+Terminal en mi máquina (host `127.0.0.1`):
+
+![Terminal conectada a 127.0.0.1](evidencia/terminal-conexion-127.png)
+
+### ¿Por qué difieren?
+
+Las cadenas difieren porque las conexiones se realizan desde dos contextos de red distintos, el 
+primero es dentro de Docker, el cual crea una red interna para el stack, proporcionando un 
+servidor DNS integrado. El segundo va por fuera de Docker, mi máquina física no forma parte de
+la red interna de Docker, ni tiene acceso a su DNS.
+
+### Comprobaciones de seguridad
+
+- `ss -ltn`: los tres puertos (8080, 8888, 5432) escuchan en `127.0.0.1`.
+- Jupyter sin token responde 403; con token, 200.
