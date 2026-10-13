@@ -11,3 +11,8 @@ CREATE SCHEMA IF NOT EXISTS cdm;
 
 -- results: salidas de los análisis, separadas de los datos de origen.
 CREATE SCHEMA IF NOT EXISTS results;
+
+-- staging: cargas intermedias, antes de limpiar y pasar los datos a cdm.
+-- Se añadió tras comparar con la solución de referencia (actividad 10), para
+-- que el stack sirva también en las sesiones posteriores del curso.
+CREATE SCHEMA IF NOT EXISTS staging;
