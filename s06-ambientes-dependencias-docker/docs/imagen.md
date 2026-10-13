@@ -295,6 +295,38 @@ Tras corregir la sintaxis y el orden, la construcción fue exitosa, el tamaño d
 
 ## 7. Secretos en capas
 
+### El experimento y la falsa sensación de borrado
+Para demostrar cómo Docker gestiona los archivos eliminados, se construyó una imagen de prueba (`secreto-prueba`) introduciendo un archivo `.env` falso (`API_KEY=falso-123-no-es-un-secreto-real`) y borrándolo inmediatamente en la siguiente instrucción. El `Dockerfile` constaba de tres pasos:
+
+```dockerfile
+FROM python:3.12-slim
+COPY .env /app/.env      # Capa A: introduce el secreto
+RUN rm /app/.env         # Capa B: intenta borrarlo
+```
+
+Al ejecutar un contenedor a partir de esta imagen (`docker run --rm secreto-prueba cat /app/.env`), el sistema devolvió `No such file or directory`. Aparentemente, el archivo había sido eliminado con éxito.
+
+### Evidencia: recuperación del secreto
+A pesar de que el archivo no era visible en el contenedor en ejecución, el secreto seguía vivo dentro de la imagen. La evidencia se recolectó por dos vías:
+* **El historial de capas:** `docker history --no-trunc secreto-prueba` reveló que las instrucciones crearon dos capas separadas e intactas: una para `COPY .env /app/.env` (12.3 kB) y otra para `RUN rm /app/.env` (8.19 kB).
+* **Inspección del sistema de archivos:** Al exportar la imagen con `docker save` y descomprimir el archivo `.tar`, se comprobó el contenido real de los directorios internos. La capa original (`435e8077…`) contenía el archivo `app/.env` con el valor del secreto expuesto en texto plano. La capa posterior (`356a2a9d…`) contenía únicamente un archivo llamado `app/.wh..env`.
+
+### Por qué ocurre esto
+Este comportamiento es inherente a la naturaleza de las capas en Docker (sistemas de archivos de unión o *UnionFS*) y no tiene relación con la caché de construcción.
+* Cada instrucción `COPY` y `RUN` crea una capa inmutable y permanente. La imagen final es simplemente la superposición de todas ellas.
+* La instrucción `rm` no elimina los datos físicos de la capa anterior; en su lugar, crea una nueva capa que contiene una **marca de borrado** (*whiteout*, representada por el prefijo `.wh.`). 
+* El contenedor oculta el archivo en tiempo de ejecución al leer la marca `.wh.`, pero la capa original (Capa A) viaja siempre dentro de la imagen, permitiendo que cualquiera con acceso al archivo comprimido recupere el secreto.
+
+### La forma correcta: inyección en tiempo de ejecución
+La manera segura de manejar variables sensibles es pasarlas únicamente cuando el contenedor arranca, utilizando banderas como `-e API_KEY=falso...` o `--env-file .env`. De este modo, el valor vive exclusivamente en la memoria del proceso y nunca se consolida en el disco de la imagen. Adicionalmente, el archivo `.env` debe incluirse en el `.gitignore` (y ya se encuentra excluido del contexto de construcción gracias al `.dockerignore` de lista blanca).
+
+### Salvedades y limitaciones
+* **Otras vías de filtración:** Este riesgo aplica a cualquier tipo de dato sensible (contraseñas, tokens, claves SSH). Además, declarar variables con `ENV` o `ARG` dentro del `Dockerfile` también es inseguro, ya que sus valores quedan registrados permanentemente en el `docker history`.
+* **Límites de la inyección por CLI:** Pasar secretos con `-e` en producción no es la práctica definitiva, ya que el valor queda visible al ejecutar `docker inspect` y en el historial de la terminal del *host*. Para entornos reales, se requiere el uso de gestores de secretos dedicados o la inyección segura durante la construcción con BuildKit (`--mount=type=secret`).
+* **El alcance del `.dockerignore`:** Aunque el `.dockerignore` en la raíz evita arrastrar secretos desde el repositorio local, no ofrece ninguna protección si el secreto se descarga, genera o clona dinámicamente durante un comando `RUN` en el proceso de construcción.
+
+**Moraleja:** En una imagen de Docker, borrar no es borrar; cada capa es permanente e inmutable. Lo que no debe estar en la imagen final, no debe entrar jamás en ninguna de sus capas.
+
 ## 8. Escaneo de vulnerabilidades
 
 ## 9. Pruebas dentro del contenedor
