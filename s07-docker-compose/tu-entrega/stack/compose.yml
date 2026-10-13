@@ -56,6 +56,13 @@ services:
       PGUSER: ${POSTGRES_USER:?falta POSTGRES_USER en .env}
       PGDATABASE: ${POSTGRES_DB:?falta POSTGRES_DB en .env}
       PGPASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
+    volumes:
+      # Bind mount: la carpeta ./notebooks de MI máquina (izquierda) aparece como
+      # /home/jovyan/work dentro del contenedor (derecha). Es la carpeta de
+      # trabajo que la imagen ya trae. Lo que edito en mi editor se ve en
+      # Jupyter al instante, y lo que guarda Jupyter queda en mi disco,
+      # así que sobrevive a "down -v" (a diferencia de un volumen con nombre).
+      - ./notebooks:/home/jovyan/work
     ports:
       # Solo loopback, igual que Adminer.
       - "127.0.0.1:8888:8888"

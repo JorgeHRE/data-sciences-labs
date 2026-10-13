@@ -120,3 +120,38 @@ No se aplicó tras el paso 2 ni el paso 3. Esto ocurre porque la imagen de Postg
 ### ¿Qué hace falta para que se aplique?
 
 Hace falta destruir el volumen persistente mediante la bandera -v (ej. docker compose down -v) para que, al volver a arrancar, el directorio de datos esté vacío y se vuelva a disparar el proceso de inicialización. Lo que se pierde al hacer esto es absolutamente toda la información y estado de la base de datos: es un borrón y cuenta nueva, destruyendo cualquier dato que se haya insertado o modificado manualmente después de la primera creación.
+
+## Actividad 4 — Persistencia: qué sobrevive y qué no
+
+### Qué se añadió
+
+- Bind mount `./notebooks:/home/jovyan/work` en el servicio `jupyter`. La carpeta
+  `notebooks/` de mi máquina es la carpeta de trabajo de Jupyter.
+- Los datos de Postgres siguen en el volumen con nombre `pgdata`.
+
+### Datos de prueba que inserté
+
+Inserté manualmente la fila `(6, 8507, 1965)` en la tabla `cdm.person` utilizando la consola SQL de **Adminer**. Antes de ejecutar los comandos de prueba, la tabla contaba con 6 filas en total (las 5 iniciales generadas por el script `initdb` más esta nueva inserción manual).
+
+### Tabla de persistencia
+
+| Comando | ¿Sobreviven los datos? | ¿Por qué? |
+|---|---|---|
+| `docker compose restart` | Sí, la fila 6 sigue ahí. | Los contenedores no se eliminan, solo se reinician sus procesos internos. Los datos persisten intactos en el volumen `pgdata`, el cual ni siquiera se toca durante un reinicio. |
+| `docker compose down` + `up` | Sí, la fila 6 sigue ahí. | El comando `down` destruye los contenedores y la red, pero respeta los volúmenes. Al levantar el *stack* nuevamente con `up`, el nuevo contenedor de Postgres se conecta al volumen `stack_pgdata` existente y recupera todos los datos. |
+| `docker compose down -v` + `up` | No, la fila 6 desaparece y la tabla vuelve a sus 5 filas iniciales. | El flag `-v` instruye a Docker para que también destruya los volúmenes con nombre. Al hacer `up`, el contenedor encuentra el directorio de datos vacío y vuelve a ejecutar los scripts de `initdb` desde cero (que solo contienen las filas 1 a 5). Este es el mismo mecanismo observado en la actividad 3. |
+
+### Bind mount para los notebooks
+
+El *bind mount* permitió la sincronización bidireccional inmediata en la misma ruta:
+- Al crear el archivo `Untitled.ipynb` desde la interfaz web de Jupyter, este apareció instantáneamente en la carpeta local `./notebooks/` de mi máquina (siendo mi usuario local el dueño).
+- Al crear o editar el archivo `hola.py` directamente desde mi editor local en `./notebooks/`, los cambios se reflejaron de inmediato en la carpeta `work/` dentro de Jupyter.
+- Todo esto ocurrió **sin necesidad de reconstruir la imagen ni reiniciar el contenedor**, porque ambas rutas apuntan exactamente al mismo directorio físico en el disco; no hay copias de por medio.
+- Los permisos fluyeron sin problemas porque, por casualidad en este entorno, mi UID local y el UID del usuario `jovyan` dentro del contenedor coinciden (ambos son `1000`).
+
+### ¿Qué diferencia hay entre el volumen `pgdata` y el bind mount de `notebooks/`?
+
+La diferencia fundamental es **quién los administra y cómo reaccionan al ciclo de vida de Docker**:
+
+- El **volumen con nombre (`pgdata`)** es administrado 100% por Docker. Está oculto en el sistema de archivos interno de Docker, optimizado para el rendimiento de bases de datos y evita problemas de permisos cruzados. Sin embargo, su ciclo de vida está atado a Docker: al ejecutar `docker compose down -v`, **se borra irreversiblemente**. Es ideal para el "estado interno" de un servicio.
+- El **bind mount (`./notebooks`)** es una carpeta local administrada por el sistema operativo del *host*. Es ideal para código o archivos que quiero editar en tiempo real con mis propias herramientas. Lo más importante: al ejecutar `docker compose down -v`, **Docker no toca ni borra esta carpeta**.
