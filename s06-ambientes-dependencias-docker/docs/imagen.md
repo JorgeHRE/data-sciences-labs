@@ -262,6 +262,37 @@ En un monorepo, escribir un `.dockerignore` como lista blanca (`*` seguido de ex
 
 ## 6. Usuario no-root
 
+### El riesgo mitigado
+Evita que un atacante con ejecución de código en la aplicación pueda instalar malware o alterar archivos críticos del sistema. Al aplicar el principio de mínimo privilegio y defensa en profundidad, el daño queda contenido y se reduce el riesgo de afectar a la máquina anfitriona mediante volúmenes o fallos del *runtime*.
+
+### Estado anterior e implementación
+Por defecto, la etapa final (`python:3.12-slim`) no especificaba un usuario, por lo que la instrucción `docker run --rm clinlab:final id` devolvía privilegios absolutos: `uid=0(root) gid=0(root) groups=0(root)`.
+
+Para aislar el proceso, se añadieron tres instrucciones al final del `Dockerfile` (en la etapa de ejecución), estrictamente en este orden:
+
+1. **`RUN useradd -m appuser`**: Crea el usuario local dentro de la imagen. Es obligatorio que exista antes de intentar usarlo o asignarle archivos.
+2. **`COPY --from=0 --chown=appuser:appuser /app/.venv /app/.venv`**: Transfiere el entorno virtual. Usar el *flag* `--chown` aquí (antes de las rutas) asigna la propiedad al vuelo, evitando usar un `RUN chown` posterior que duplicaría el peso de los archivos en una nueva capa.
+3. **`USER appuser`**: Se coloca justo antes del `CMD`, asegurando que las tareas administrativas previas se hagan como root y que solo se bajen los privilegios en el instante final para ejecutar la aplicación.
+
+*Nota sobre el proceso:* Llegar a esta estructura requirió iteración. Los errores comunes incluyeron colocar estas instrucciones en la etapa *builder* en lugar de la final, incluir un `COPY . /app` que arrastraba el contexto completo rompiendo el `.dockerignore`, y colocar el `--chown` al final de la línea, donde Docker lo interpreta erróneamente como una ruta de destino.
+
+### Evidencia y validación
+
+Tras corregir la sintaxis y el orden, la construcción fue exitosa, el tamaño de la imagen se mantuvo intacto (~307 MB) y la aplicación (`import clinlab`) arrancó sin errores con el nuevo usuario.
+
+| Prueba en ejecución | Usuario activo | Resultado |
+| :--- | :--- | :--- |
+| `docker run --rm clinlab:final id` | `appuser` (por defecto) | `uid=1000(appuser) gid=1000(appuser) groups=1000(appuser)` |
+| `docker run --rm clinlab:final sh -c 'touch /etc/x'` | `appuser` (por defecto) | `Permission denied` (escritura en sistema bloqueada) |
+| `docker run --user root --rm clinlab:final sh -c 'touch /etc/x'` | `root` (forzado) | El archivo se creó exitosamente |
+
+### Salvedades y moraleja
+
+* **El límite de la directiva `USER`:** Como demuestra la tabla de pruebas, `USER` establece un comportamiento seguro por defecto, pero no es un candado inquebrantable. Alguien con acceso al demonio de Docker en el *host* puede sobrescribirlo usando `--user root`. Esta medida protege contra atacantes que vulneran la aplicación desde la red, no contra administradores maliciosos.
+* **Tipología de usuario (`-m` vs. `--system`):** El comando `useradd -m` creó un usuario estándar (UID `1000`) con un directorio *home*. Para reducir aún más la superficie de ataque, sería preferible configurar un usuario de sistema (`--system --no-create-home --shell /usr/sbin/nologin` con un UID bajo), aunque a efectos prácticos de permisos de escritura, el nivel de bloqueo actual cumple el objetivo.
+
+**Moraleja:** Un contenedor es un proceso aislado, no una caja fuerte. Si el mecanismo de aislamiento falla, la última línea de defensa son los permisos que el sistema operativo le concedió a ese proceso. Reducir esos permisos drásticamente cuesta apenas dos o tres líneas en un `Dockerfile`.
+
 ## 7. Secretos en capas
 
 ## 8. Escaneo de vulnerabilidades
