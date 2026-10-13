@@ -1,3 +1,4 @@
+#Etapa 1: Imagen de construcción (builder)
 # 1. Imagen base
 FROM python:3.12-slim
 
@@ -17,7 +18,12 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY s05-buenas-practicas-pytest/src/ ./src/
 
 # 7. Instalar el paquete clinlab (capa ligera y rápida)
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-editable
+#etapa 2: Imagen final de ejecución
+FROM python:3.12-slim
+WORKDIR /app
+# Traer únicamente el entorno virtual ya construido desde la etapa anterior
+COPY --from=0 /app/.venv /app/.venv
 
 # 8. Activar el entorno virtual para tiempo de ejecución
 ENV PATH="/app/.venv/bin:$PATH"
