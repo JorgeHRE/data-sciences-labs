@@ -128,6 +128,77 @@ En un Dockerfile el orden de las instrucciones es sumamente importante, ya que e
 
 ## 4. Tamaño de la imagen
 
+### Método y tabla de resultados
+
+Los tamaños se midieron con la columna `SIZE` de `docker images`, construyendo cada variante desde la raíz del repositorio con la opción `-f` apuntando a los archivos en `s06-ambientes-dependencias-docker/tamanos/` (`Dockerfile.0-ingenuo` a `Dockerfile.5-alpine`):
+
+```bash
+docker build -f s06-ambientes-dependencias-docker/tamanos/Dockerfile.<paso> -t clinlab:<tag> .
+docker images clinlab
+```
+
+En cada paso se modificó una sola cosa respecto al anterior, **salvo en dos transiciones** donde el cambio de tamaño combina dos ajustes necesarios para que la imagen funcionara:
+* **`t3` → `t4`:** Además de separar en dos etapas (multi-stage), se introdujo un entorno virtual con `python -m venv` que `t3` no tenía.
+* **`clinlab:bueno` → `clinlab:final`:** Además de pasar de una etapa a dos etapas, se añadió la opción `--no-editable` en el segundo `uv sync`.
+
+| Paso | Imagen | Qué cambia | Tamaño | Diferencia |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | `clinlab:t0` | `python:3.12`, `COPY` de la carpeta `s05` entera, `pip install .` sin `--no-cache-dir`, sin `.dockerignore` | 2.28 GB | — |
+| **1** | `clinlab:t1` | base `python:3.12-slim` | 857 MB | −1 423 MB |
+| **2** | `clinlab:t2` | `pip install --no-cache-dir .` | 800 MB | −57 MB |
+| **3** | `clinlab:t3` | `Dockerfile.3-ignore.dockerignore` (excluye `.venv`, `.env*`, cachés, `__pycache__`, `*.pyc`, `.git`) | 384 MB | −416 MB |
+| **4** | `clinlab:t4` | multi-stage con `venv` + `pip` (añade `python -m venv`) | 385 MB | +1 MB |
+| **Aparte** | `clinlab:t5` | `python:3.12-alpine` en lugar de `slim` (con paso 3) | 303 MB | −81 MB respecto a `t3` |
+| **Final** | `clinlab:bueno` → `clinlab:final` | Dockerfile con `uv`: una etapa → dos etapas + `uv sync --no-editable` | 385 MB → 307 MB | −78 MB |
+
+El objetivo del enunciado era dejar la imagen por debajo de 500 MB; el resultado final (`clinlab:final`) fue de **307 MB**.
+
+#### Capas medidas con `docker history`
+
+| Capa | `t0` (`python:3.12`) | `t1` (`slim`) | `t2` | `t3` |
+| :--- | :--- | :--- | :--- | :--- |
+| **`COPY` de la carpeta `s05`** | 323 MB | 323 MB | 323 MB | 1.13 MB (contexto: 3.02 kB) |
+| **`pip install`** | 189 MB | 189 MB | 160 MB (`--no-cache-dir`) | 160 MB |
+
+---
+
+### El hallazgo del multi-stage: `pip` vs. `uv`
+
+* **Con `pip` (`t3` → `t4`, de 384 MB a 385 MB):** El multi-stage no redujo el tamaño y sumó 1 MB. En `t3` (una sola etapa sin entorno virtual), la capa `COPY` pesó 1.13 MB y la capa `pip install` pesó 160 MB (dentro de ella, `site-packages` ocupaba 154 MB —`pandas` 72 MB, `numpy` 43 MB, `numpy.libs` 27 MB y `pip` 12 MB— y `/root/.cache` ocupaba 2 MB). Al pasar a `t4`, se creó un entorno virtual con `python -m venv` en la etapa de construcción para copiarlo a la etapa final: la capa `COPY /app/.venv` resultante en `t4` pesó **162 MB**, superando por un estrecho margen las capas de `pip install` (160 MB) y `COPY` (1.13 MB) de `t3`. Como las librerías se instalaron desde *wheels* precompilados y no se instalaron compiladores adicionales en la etapa de build, no había herramientas pesadas que descartar.
+* **Con `uv` (`clinlab:bueno` → `clinlab:final`, de 385 MB a 307 MB):** Aquí el cambio redujo **78 MB** (combinando la separación en dos etapas y el flag `--no-editable`). En el Dockerfile de una sola etapa (`clinlab:bueno`), la imagen cargaba con la capa del binario de `uv` (45.1 MB), la caché en `/root/.cache` (5.6 MB) y el código fuente en `src/`. En la versión de dos etapas (`clinlab:final`), la etapa final parte de `python:3.12-slim` limpia y solo copia `/app/.venv`, dejando atrás tanto el binario de `uv` (`which uv` ya no lo encuentra) como `src/`.
+* **El efecto de `--no-editable`:** Con `uv sync` por defecto (modo editable), el entorno virtual contiene el archivo `__editable__.clinlab-0.1.0.pth` que apunta a `/app/src`. Como en la etapa final esa carpeta no existe, ejecutar `import clinlab` fallaba con `ModuleNotFoundError`. Al añadir `--no-editable`, la carpeta `clinlab` se instala directamente dentro de `site-packages` y `docker run --rm clinlab:final` termina con código 0.
+
+---
+
+### El experimento con Alpine
+
+* **Hipótesis inicial:** La predicción constaba de dos partes: que la imagen con Alpine **sería más chica**, pero que **`pip install` fallaría compilando** al no contar con compiladores de C para construir `pandas` y `numpy`.
+* **Qué pasó y por qué:** Se cumplió la mitad de la hipótesis (sí fue más chica) y falló la otra mitad (no hubo error de compilación). La construcción terminó sin errores y dejó la imagen en **303 MB** (−81 MB respecto a los 384 MB de `t3`). No hizo falta compilar nada porque PyPI ya distribuye *wheels* precompilados para sistemas basados en `musl`: el registro del build mostró la descarga de `pandas-3.0.6-...musllinux_1_2_x86_64.whl` (11.8 MB) y `numpy-2.5.4-...musllinux_1_2_x86_64.whl` (18.5 MB). Esos binarios `musllinux` son un poco más grandes que sus equivalentes `manylinux` en `slim` (10.8 MB y 16.7 MB), por lo que la capa `pip install` en Alpine pesó 170 MB frente a los 160 MB en `t3`. La prueba `import clinlab, pandas` funcionó sin problemas (pandas 3.0.6 sobre Alpine Linux), aunque no se corrieron los tests en esta imagen.
+
+---
+
+### Discrepancias y salvedades
+
+#### Estimaciones frente a mediciones reales
+
+| Qué | Estimado | Medido |
+| :--- | :--- | :--- |
+| **Tamaño de `t0`** | ~1.4–1.5 GB | 2.28 GB |
+| **Ahorro del `.dockerignore`** | ~300 MB | 416 MB |
+| **Ahorro del multi-stage con `pip`** | ~100 MB | +1 MB |
+| **Resultado de `alpine`** | `pip install` falla compilando | no falló (*wheels* `musllinux`) |
+| **Ahorro del multi-stage con `uv`** | ~50 MB | 78 MB |
+
+* **La suma de las capas de `docker history` no coincide con `docker images`:**
+  * Las capas de la base `slim` suman ~134 MB (87.7 + 4.94 + 41.4 MB). En `t1`, al sumar esa base con el `COPY` (323 MB) y el `pip install` (189 MB) se obtienen ~646 MB, pero `docker images` reporta **857 MB** (una diferencia de ~210 MB sin causa identificada). De igual modo, en `t2` la suma por capas da ~617 MB frente a los **800 MB** que muestra `docker images`.
+  * Las reducciones en el tamaño total de `docker images` también fueron mayores que la diferencia individual de la capa modificada: al pasar de `t1` a `t2`, la capa `pip install` bajó 29 MB (de 189 a 160 MB) y la imagen total bajó **57 MB** (de 857 a 800 MB); al pasar de `t2` a `t3`, la capa `COPY` bajó 322 MB (de 323 a 1.13 MB) y la imagen total bajó **416 MB** (de 800 a 384 MB).
+* **Corrida única:** Cada medición corresponde a una sola ejecución.
+
+---
+
+### Moraleja
+
+Optimizar el peso de una imagen de Docker exige medir en lugar de asumir: más del 90 % del ahorro total provino de dos decisiones básicas —elegir la imagen base adecuada (−1 423 MB) y excluir el entorno local con `.dockerignore` (−416 MB)—, mientras que patrones más complejos como el *multi-stage* solo aportan valor real cuando la etapa de construcción introduce peso extra que no pertenece a producción (como el binario de `uv`).
 ## 5. `.dockerignore` y contexto
 
 ## 6. Usuario no-root

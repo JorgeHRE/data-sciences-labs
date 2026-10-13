@@ -1,0 +1,9 @@
+FROM python:3.12
+
+WORKDIR /app
+
+COPY s05-buenas-practicas-pytest/ ./
+
+RUN pip install .
+
+CMD ["python", "-c", "import clinlab"]
