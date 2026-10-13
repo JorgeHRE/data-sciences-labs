@@ -154,4 +154,50 @@ El *bind mount* permitió la sincronización bidireccional inmediata en la misma
 La diferencia fundamental es **quién los administra y cómo reaccionan al ciclo de vida de Docker**:
 
 - El **volumen con nombre (`pgdata`)** es administrado 100% por Docker. Está oculto en el sistema de archivos interno de Docker, optimizado para el rendimiento de bases de datos y evita problemas de permisos cruzados. Sin embargo, su ciclo de vida está atado a Docker: al ejecutar `docker compose down -v`, **se borra irreversiblemente**. Es ideal para el "estado interno" de un servicio.
-- El **bind mount (`./notebooks`)** es una carpeta local administrada por el sistema operativo del *host*. Es ideal para código o archivos que quiero editar en tiempo real con mis propias herramientas. Lo más importante: al ejecutar `docker compose down -v`, **Docker no toca ni borra esta carpeta**.
+- El **bind mount (`./notebooks`)** es una carpeta local administrada por el sistema operativo del *host*. Es ideal para código o archivos que quiero editar en tiempo real con mis propias herramientas. Lo más importante: al ejecutar `docker compose down -v`, **Docker no toca ni borra esta carpeta**. Tras comprobarlo haciendo un `down -v` + `up -d`, confirmé que mis archivos `Untitled.ipynb` y `hola.py` sobrevivieron intactos, a pesar de que los datos de Postgres se reiniciaron.
+
+
+## Actividad 5 — Sincronización de servicios con healthchecks
+
+### Qué se añadió
+
+- **Healthcheck en el servicio `db`**: Se configuró para que cada 5 segundos ejecute `pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB` (con `timeout: 3s`, `retries: 10` y `start_period: 10s`). Esto le pregunta activamente a Postgres si ya está aceptando conexiones.
+- **`depends_on` con `condition: service_healthy` en `jupyter`**: Ahora Jupyter no arranca hasta que la base de datos reporte que está sana. Anteriormente solo esperaba a que el contenedor de `db` existiera.
+- **Script `notebooks/conectar.py`**: Un pequeño script en Python que intenta conectarse a la base de datos sin reintentos y devuelve "OK" o "FALLÓ". Su propósito es medir y evidenciar el fallo de conexión.
+
+### Cómo se provocó el fallo
+
+Como Jupyter no se conecta a nada automáticamente al arrancar y la base de datos se inicializa en menos de un segundo, tuve que forzar la condición de carrera (*race condition*). El método consistió en destruir todo el estado, levantar el stack y ejecutar inmediatamente el script de conexión:
+`docker compose down -v` + `docker compose up -d` y, de inmediato, `docker compose exec jupyter python conectar.py`.
+
+### Resultados (Mediciones)
+
+Aunque el enunciado menciona que este fallo puede ser intermitente en máquinas rápidas, al lanzar el `exec` pegado al `up`, el fallo fue sistemático:
+
+| Configuración | Intentos | Conectaron a la primera | Qué vi en la consola |
+|---|---|---|---|
+| **Sin healthcheck** | 5 | 0 | `Connection refused` en todos los intentos, a pesar de que el log del `up` decía `Started` para `db`. |
+| **Con healthcheck** | 5 | 5 | El comando `up` esperó hasta marcar la base como `Healthy` (~5.7 s) antes de siquiera arrancar el contenedor de Jupyter. Todas las conexiones fueron exitosas. |
+
+Evidencia: `docker compose ps` con el stack levantado desde cero y el healthcheck activo:
+
+```text
+NAME              IMAGE           COMMAND                  SERVICE   CREATED         STATUS                   PORTS
+stack-adminer-1   adminer:4       "entrypoint.sh docke…"   adminer   9 minutes ago   Up 9 minutes             127.0.0.1:8080->8080/tcp
+stack-db-1        postgres:16     "docker-entrypoint.s…"   db        9 minutes ago   Up 9 minutes (healthy)   127.0.0.1:5432->5432/tcp
+stack-jupyter-1   stack-jupyter   "tini -g -- start.sh…"   jupyter   9 minutes ago   Up 9 minutes (healthy)   127.0.0.1:8888->8888/tcp
+```
+
+### Por qué "arrancó" no significa "está listo"
+
+- Para Docker, un contenedor en estado **Up (Started)** solo significa que su proceso principal (el PID 1) ya existe. 
+- Sin embargo, Postgres tarda un tiempo adicional en inicializar su directorio de datos, ejecutar los scripts de la carpeta `initdb` y finalmente abrir el puerto para escuchar peticiones.
+- Durante ese hueco temporal, Docker da el contenedor por arrancado y levanta a los dependientes (como Jupyter). Pero si un cliente intenta conectarse en ese instante, recibe un "Connection refused" porque la aplicación interna aún no está lista.
+- El **healthcheck** soluciona esto cambiando la pregunta que hace Docker: pasa de *"¿existe el proceso?"* a *"¿la aplicación responde a lo que necesito?"*. Combinado con `depends_on: service_healthy`, obliga a los demás servicios a esperar esa confirmación.
+
+### Detalles técnicos relevantes del diseño
+
+- **El flag `-h 127.0.0.1` es a propósito**: Durante la inicialización (`initdb`), Postgres levanta un servidor temporal que solo escucha por socket Unix. Al medirlo en un contenedor desechable, el test por socket daba "OK" a los 0.49 s, pero por TCP tardaba 0.69 s (cuando ya escuchaba el servidor real). Si omitíamos el `-h`, el healthcheck podría haber dado "sano" prematuramente.
+- **El doble dólar (`$$`)**: En `$$POSTGRES_USER` evita que Docker Compose intente sustituir la variable con los valores de mi máquina local antes de crear el contenedor. Así la resolución ocurre correctamente dentro del entorno de Postgres.
+- **Dos orígenes de healthchecks**: Al hacer `docker ps`, noté que ambos contenedores decían `(healthy)`. El de Jupyter viene incluido "de fábrica" en la imagen base oficial que utilizamos, mientras que el de la base de datos lo escribí yo en el `docker-compose.yml`.
+- **El coste**: Arrancar en orden tiene un precio. Hacer `up` tarda unos 5 segundos más (lo que coincide con el `interval: 5s` del healthcheck). Es el costo de asegurar que el sistema se levanta de forma determinista y sin errores de conexión.

@@ -19,6 +19,19 @@ services:
       # volumen está vacío (primer arranque). ":ro" = solo lectura para el
       # contenedor; no necesita modificar tus scripts.
       - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # "Arrancó" no es "está listo": el contenedor puede estar corriendo
+      # mientras Postgres aún inicializa. Este test pregunta si ACEPTA
+      # conexiones. Va con "-h 127.0.0.1" (TCP) a propósito: durante initdb
+      # corre un servidor temporal que solo escucha por socket Unix; sin -h,
+      # pg_isready lo daría por sano antes de tiempo.
+      # "$$VAR": el doble $ evita que Compose lo sustituya en mi máquina; se
+      # evalúa dentro del contenedor.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s      # cada cuánto se ejecuta el test
+      timeout: 3s       # cuánto se espera la respuesta de cada test
+      retries: 10       # fallos seguidos para marcarlo "unhealthy"
+      start_period: 10s # margen inicial: los fallos aquí no cuentan
     ports:
       # Actividad 2: se publica para conectarme desde mi máquina (fuera de
       # Docker), pero SOLO en el loopback. Entre contenedores no hace falta:
@@ -43,7 +56,9 @@ services:
       context: .
       dockerfile: Dockerfile.jupyter
     depends_on:
-      - db
+      db:
+        # No basta con que "db" haya arrancado: Jupyter espera a que esté SANO.
+        condition: service_healthy
     environment:
       # Token de acceso: Jupyter ejecuta código arbitrario, no se deja abierto.
       JUPYTER_TOKEN: ${JUPYTER_TOKEN:?falta JUPYTER_TOKEN en .env}
