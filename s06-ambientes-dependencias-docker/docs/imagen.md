@@ -461,3 +461,46 @@ docker run --rm clinlab:test
 **Moraleja:** El famoso "funciona en mi máquina" casi siempre esconde dependencias globales que nadie declaró. Una imagen de pruebas separada las saca a la luz de inmediato, al mismo tiempo que permite mantener la imagen de producción pequeña y sin herramientas de desarrollo.
 
 ## 10. Publicación en ghcr.io
+
+### La contradicción del enunciado y la decisión de diseño
+El enunciado requiere que un compañero ejecute `docker run --rm ghcr.io/tu-usuario/clinlab:0.1.0 pytest` para validar la imagen publicada. Sin embargo, en la actividad 9 se decidió mantener la imagen de producción limpia y sin herramientas de desarrollo (como `pytest`). Para resolver esta contradicción, se evaluaron tres opciones:
+
+| Opción | Qué se publica | Consecuencia |
+| :--- | :--- | :--- |
+| **A** | Solo la imagen de producción. | La prueba final del enunciado falla por falta del ejecutable `pytest`. |
+| **B (Elegida)** | `clinlab` (producción) y `clinlab-test` (etapa de pruebas). | La imagen de producción se mantiene limpia (307 MB) y la prueba del enunciado se ejecuta con éxito sobre la variante de pruebas. |
+| **C** | Solo la etapa `test` bajo el nombre `clinlab`. | Cumple con la literalidad del comando del enunciado, pero arruina la separación de entornos lograda en la actividad 9. |
+
+### Implementación del Workflow de CD
+Se creó el archivo `.github/workflows/publish-s06.yml` separado de `ci-s05.yml`. Mientras que la calidad (CI) es obligatoria en los *Pull Requests*, la publicación (CD) altera artefactos externos y solo debe ocurrir al integrar código definitivo a `main`. Las características del flujo son:
+* **Disparadores:** Un evento `push` a la rama `main`, restringido mediante un filtro `paths` (`Dockerfile`, `.dockerignore`, código fuente de `s05` y el propio workflow) para evitar publicaciones innecesarias frente a simples cambios de documentación.
+* **Permisos y Autenticación:** Se asignaron explícitamente los permisos `contents: read` y `packages: write` al *job*, utilizando el token automático de GitHub (`secrets.GITHUB_TOKEN`) a través de `docker/login-action`, eliminando la necesidad de crear tokens personales (PAT).
+* **Resolución de mayúsculas:** GitHub Container Registry (`ghcr.io`) exige que los nombres de repositorio estén en minúsculas. Como el usuario es `JorgeHRE`, se inyectó un paso en bash (`${GITHUB_REPOSITORY_OWNER,,}`) para forzar la conversión antes del etiquetado y evitar un fallo de subida.
+* **Construcción dual y etiquetado:** Se utilizó `docker/metadata-action@v5` para generar dinámicamente las etiquetas de versión (`type=raw,value=0.1.0`) y el SHA corto del commit. Luego, `docker/build-push-action@v5` ejecutó dos compilaciones: una apuntando al contexto base sin target (producción) y otra especificando `target: test` (pruebas).
+
+### Evidencia de publicación
+El *Pull Request* #14 disparó el flujo tras su integración a `main` (commit SHA: `fa99474`). El workflow completó todos sus pasos exitosamente en 56 segundos (ejecución 38432998372). Aunque los paquetes en GitHub suelen nacer como privados por defecto, se constató que la visibilidad pública ya estaba activa (probablemente heredada del repositorio), permitiendo accesos externos de inmediato.
+
+| Imagen publicada | Etiquetas generadas | Tamaño |
+| :--- | :--- | :--- |
+| `ghcr.io/jorgehre/clinlab` | `0.1.0`, `sha-fa99474` | 307 MB |
+| `ghcr.io/jorgehre/clinlab-test` | `0.1.0`, `sha-fa99474` | 538 MB |
+
+Una prueba de extracción anónima (`docker pull`) sin autenticación previa confirmó que los paquetes son de acceso público. Al ejecutar `ghcr.io/jorgehre/clinlab-test:0.1.0 pytest`, la suite pasó sus 39 pruebas en 1.18 s con una cobertura del 100 % (57 sentencias). Por su parte, la imagen de producción (`clinlab:0.1.0`) arrancó sin errores al validar la instrucción `import clinlab` como el usuario restringido `appuser`.
+
+### Confirmación de un tercero (Pendiente)
+Para validar el laboratorio de forma definitiva, un tercero debe ejecutar el siguiente comando (solo requiere tener Docker instalado en su máquina):
+```bash
+docker run --rm ghcr.io/jorgehre/clinlab-test:0.1.0 pytest
+```
+* **Persona que verificó:** [Pendiente]
+* **Fecha:** [Pendiente]
+* **Resultado:** [Pendiente]
+
+### Salvedades del diseño
+* **Gestión de etiquetas:** La versión `0.1.0` está escrita a mano (*hardcoded*) en el workflow, por lo que podría desincronizarse del valor real en `pyproject.toml`. Además, mientras el SHA es inmutable, la etiqueta `0.1.0` se sobrescribirá en cada nueva publicación.
+* **Caché entre compilaciones:** Al no configurar el caché en red (`cache-from`/`cache-to` con `type=gha`), la construcción de la imagen de pruebas repite la etapa del *builder*. No produce un resultado incorrecto, pero penaliza los tiempos de ejecución.
+* **Límites del disparador:** Un *push* a `main` solo publica si cambia algún archivo contemplado en el filtro `paths`.
+* **Privilegios en el entorno de pruebas:** Mientras la imagen de producción ejecuta sus procesos de forma segura como `appuser`, la imagen de pruebas (`clinlab-test`) corre como `root`. Esto se debe a que la etapa `test` hereda directamente de la etapa de construcción (`FROM builder AS test`), la cual opera como `root` por defecto; la directiva `USER appuser` existe únicamente en la etapa final de producción, que representa una rama separada en la jerarquía del `Dockerfile`.
+
+**Moraleja:** Todo el recorrido técnico de este laboratorio apunta a que delegar la construcción y publicación a un entorno de Integración Continua promete neutralizar el clásico «funciona en mi máquina». A la espera de la confirmación empírica del tercero, el sistema documenta implícitamente las dependencias y transforma el código en un artefacto reproducible que debería comportarse igual en cualquier máquina que cuente con Docker, quedando permanentemente vinculado al código fuente mediante su identificador SHA.
