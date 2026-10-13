@@ -42,6 +42,10 @@ services:
   # --- Cliente web ---------------------------------------------------------
   adminer:
     image: adminer:4
+    # Perfil "dev": Adminer solo se levanta si lo pido con "--profile dev".
+    # Sin esa bandera, "docker compose up" lo ignora. Es la pieza de más riesgo
+    # (panel de administración de la base), así que no debe estar siempre encendido.
+    profiles: ["dev"]
     depends_on:
       - db
     ports:

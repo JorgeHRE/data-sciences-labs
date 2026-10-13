@@ -236,3 +236,32 @@ texto que arrojó fue:
 error while interpolating services.db.environment.POSTGRES_PASSWORD: required variable POSTGRES_PASSWORD is missing a value: falta POSTGRES_PASSWORD en .env
 error while interpolating services.jupyter.environment.PGPASSWORD: required variable POSTGRES_PASSWORD is missing a value: falta POSTGRES_PASSWORD en .env
 ```
+
+## Actividad 7 — Un servicio opcional
+
+### Qué se añadió
+
+- `profiles: ["dev"]` en el servicio `adminer`. Sin esa bandera, `docker compose up`
+  lo ignora; con `--profile dev`, se levanta.
+- `db` y `jupyter` no tienen perfil: siempre se levantan.
+- Motivo: Adminer es la pieza de más riesgo (panel de administración de la base) y,
+  como decidimos en la actividad 1, no debe estar encendido todo el tiempo.
+
+### Caso 1: `docker compose up -d` (sin perfil)
+
+Al ejecutar el comando sin la bandera del perfil, la salida de `docker compose ps` solo mostró a los contenedores `db` y `jupyter` en ejecución; Adminer brilló por su ausencia. Consecuentemente, al abrir `http://127.0.0.1:8080` en el navegador, la página simplemente no cargó (error de conexión), confirmando que el puerto y el servicio estaban inactivos.
+
+### Caso 2: `docker compose --profile dev up -d` (con perfil)
+
+Al añadir la bandera al levantar el *stack*, la salida de `docker compose ps` mostró esta vez a los tres servicios (`db`, `jupyter` y `adminer`) activos: `db` y `jupyter` como `(healthy)` y `adminer` solo como `Up`, porque no tiene healthcheck. Compose no recreó `db` ni `jupyter`: solo arrancó Adminer. Al recargar `http://127.0.0.1:8080` en el navegador, la interfaz web de Adminer cargó correctamente, permitiendo el acceso a la base de datos.
+
+### Un detalle al apagar: `down` y los perfiles
+
+Si Adminer está corriendo e intentas apagar todo ejecutando un simple `docker compose down` (sin especificar el perfil), ocurre algo interesante: los servicios `db` y `jupyter` se apagan y eliminan correctamente, pero en la terminal aparece una advertencia amarilla sobre la red indicando `! Resource is still in use`. Compose termina sin lanzar un error fatal, pero no logra borrar la red.
+
+**¿Por qué sucede esto?**
+Docker Compose solo "ve" los servicios que pertenecen a los perfiles activos en ese momento. Al ejecutar `down` sin `--profile dev`, Compose ignora la existencia de `adminer` y no lo apaga. Sin embargo, al intentar destruir la red `stack_default`, el motor de Docker lo bloquea para proteger el sistema, ya que el contenedor de Adminer huérfano sigue conectado a ella.
+
+**La solución:**
+Debes usar la misma bandera de perfil tanto para levantar como para destruir el entorno. Ejecutar `docker compose --profile dev down` le indica a Compose que incluya a Adminer en la orden de limpieza, eliminando su contenedor y, ahora sí, liberando y borrando la red exitosamente.
+
