@@ -36,7 +36,8 @@ services:
       # Actividad 2: se publica para conectarme desde mi máquina (fuera de
       # Docker), pero SOLO en el loopback. Entre contenedores no hace falta:
       # Adminer y Jupyter lo alcanzan por la red interna como "db:5432".
-      - "127.0.0.1:5432:5432"
+      # El puerto del lado de mi máquina viene de .env; el interno (5432) es fijo.
+      - "127.0.0.1:${POSTGRES_PORT:?falta POSTGRES_PORT en .env}:5432"
 
   # --- Cliente web ---------------------------------------------------------
   adminer:
@@ -47,7 +48,7 @@ services:
       # Se publica SOLO en el loopback (127.0.0.1): únicamente esta máquina
       # lo ve. Con "8080:8080" escucharía en todas las interfaces (0.0.0.0)
       # y cualquiera en la red podría llegar al panel.
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${ADMINER_PORT:?falta ADMINER_PORT en .env}:8080"
 
   # --- Notebook ------------------------------------------------------------
   jupyter:
@@ -80,7 +81,7 @@ services:
       - ./notebooks:/home/jovyan/work
     ports:
       # Solo loopback, igual que Adminer.
-      - "127.0.0.1:8888:8888"
+      - "127.0.0.1:${JUPYTER_PORT:?falta JUPYTER_PORT en .env}:8888"
 
 volumes:
   pgdata:

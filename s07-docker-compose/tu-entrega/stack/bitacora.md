@@ -201,3 +201,38 @@ stack-jupyter-1   stack-jupyter   "tini -g -- start.sh…"   jupyter   9 minutes
 - **El doble dólar (`$$`)**: En `$$POSTGRES_USER` evita que Docker Compose intente sustituir la variable con los valores de mi máquina local antes de crear el contenedor. Así la resolución ocurre correctamente dentro del entorno de Postgres.
 - **Dos orígenes de healthchecks**: Al hacer `docker ps`, noté que ambos contenedores decían `(healthy)`. El de Jupyter viene incluido "de fábrica" en la imagen base oficial que utilizamos, mientras que el de la base de datos lo escribí yo en el `docker-compose.yml`.
 - **El coste**: Arrancar en orden tiene un precio. Hacer `up` tarda unos 5 segundos más (lo que coincide con el `interval: 5s` del healthcheck). Es el costo de asegurar que el sistema se levanta de forma determinista y sin errores de conexión.
+
+## Actividad 6 — Configuración fuera del archivo
+
+### Qué se movió a `.env`
+
+- Ya estaban desde antes: `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD` y
+  `JUPYTER_TOKEN`.
+- Ahora también los puertos del lado de mi máquina: `POSTGRES_PORT`,
+  `ADMINER_PORT` y `JUPYTER_PORT`.
+- Todas usan `${VAR:?mensaje}`: si falta alguna, `docker compose` se niega a
+  arrancar con un mensaje claro, en lugar de levantar algo a medias.
+- `127.0.0.1` se queda fijo en el `compose.yml` (no es variable): es una decisión
+  de seguridad y no quiero que alguien la cambie por accidente a `0.0.0.0`. Los
+  puertos internos (5432, 8080, 8888) tampoco son variables: no cambian.
+- `.env` está en `.gitignore`; `.env.example` se versiona, con marcadores en lugar
+  de valores reales y comentarios sobre cada variable.
+
+### Comprobación: `grep -ri "password" compose.yml`
+
+```text
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
+```
+
+La salida no está vacía porque grep (con el flag -i para ignorar mayúsculas y minúsculas) encontró la palabra PASSWORD escrita en los nombres de las variables y en el mensaje de error de mi archivo.
+
+### ¿Falla si falta una variable?
+
+Sí falla, de forma inmediata. Quité `POSTGRES_PASSWORD` de un `.env` de prueba y el
+texto que arrojó fue:
+
+```text
+error while interpolating services.db.environment.POSTGRES_PASSWORD: required variable POSTGRES_PASSWORD is missing a value: falta POSTGRES_PASSWORD en .env
+error while interpolating services.jupyter.environment.PGPASSWORD: required variable POSTGRES_PASSWORD is missing a value: falta POSTGRES_PASSWORD en .env
+```
