@@ -350,3 +350,69 @@ Lista para pasarle:
 2. Seguir **solo** el `README.md` (las tres líneas).
 3. Comprobar: `docker compose ps` (ambos `healthy`), abrir Jupyter con el token y ejecutar `psycopg.connect()`.
 4. Anotar cualquier cosa que haya tenido que adivinar o preguntar.
+
+## Actividad 10 — Comparar con la referencia
+
+Comparé mi `compose.yml` y mi `initdb/` con `solucion/` del repositorio del curso, **después** de terminar y entregar las actividades 1 a 9. La solución se compara leyendo sus archivos: tal como viene **no se puede ejecutar** (su `compose.yml` apunta a `./docker`, que no existe en la carpeta; el SQL está en `solucion/initdb/`). Su `compose.yml` además está pensado para todo el curso (sesiones 10 a 18), no solo para este laboratorio.
+
+### Diferencia 1 — Qué carpeta se monta en Jupyter
+
+| | Solución | Mi entrega |
+|---|---|---|
+| Línea | `./:/home/jovyan/work` | `./notebooks:/home/jovyan/work` |
+| Qué ve Jupyter | Toda la carpeta del stack | Solo `notebooks/` |
+
+**Comprobación** (monté cada carpeta en una copia de mi imagen de Jupyter y listé los archivos, sin abrir ninguno):
+
+- Con el montaje de la solución, dentro del contenedor aparecen `.env`, `.env.example`, `compose.yml`, `Dockerfile.jupyter`, `bitacora.md` y el resto del stack.
+- Con el mío aparecen solo `Untitled.ipynb`, `conectar.py`, `hola.py` y los archivos de apoyo de Jupyter.
+
+Es decir: con la versión de la solución, cualquier notebook puede abrir el `.env` si existe, y Jupyter ejecuta código arbitrario.
+
+- **Veredicto:** Mejor la mía.
+- **Por qué:** Por el principio de mínimo privilegio y aislamiento. Montar toda la raíz del *stack* (`./`) expone archivos de infraestructura y secretos (`.env`) dentro de un entorno diseñado para ejecutar código arbitrario, y permite que un script de Python modifique o borre por accidente el propio `compose.yml` o la bitácora. Restringir el *bind mount* a `./notebooks` acota el alcance exclusivamente a los archivos de trabajo.
+
+### Diferencia 2 — Secretos y valores por defecto
+
+| | Solución | Mi entrega |
+|---|---|---|
+| Contraseña | `${POSTGRES_PASSWORD:-omop}` | `${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}` |
+| Token de Jupyter | `${JUPYTER_TOKEN:-curso2027}` | `${JUPYTER_TOKEN:?falta JUPYTER_TOKEN en .env}` |
+| Si falta `.env` | Arranca con `omop`/`omop` y `curso2027` | `up` falla con un mensaje claro |
+
+Hechos:
+
+- En la solución, los valores por defecto están **escritos dentro del `compose.yml`** (que se versiona), y son débiles y públicos: cualquiera que lea el repo conoce la contraseña y el token.
+- En la mía, el `compose.yml` no contiene ningún valor secreto, que es lo que pide el criterio de evaluación ("ningún secreto en `compose.yml`").
+- A cambio, la solución arranca con un solo `docker compose up`, sin crear `.env`. La mía exige `cp .env.example .env`.
+- Una limitación mía: los valores de relleno de `.env.example` (`cambia_esto_...`) **también funcionan** si nadie los cambia (lo comprobé en la actividad 9). Mi protección contra una clave débil es parcial y depende de que la persona lea el README.
+
+- **Veredicto:** Mejor la mía en seguridad y cumplimiento del laboratorio; la suya es más cómoda para levantar en un clic, pero insegura.
+- **Por qué:** El operador `:-` de la solución incumple la regla de no dejar credenciales en archivos versionados y fomenta que el entorno corra con claves públicas y predecibles (`omop` / `curso2027`) sin que el usuario se entere. Mi uso de `:?` aplica el principio de *fail fast*: obliga a crear el archivo `.env` de forma consciente antes de arrancar. Aunque mi enfoque no impide que alguien deje el texto de relleno de `.env.example`, al menos saca los secretos del control de versiones.
+
+### Diferencia 3 — Qué hace `initdb` con los esquemas
+
+| | Solución (`00-schemas.sql`) | Mi entrega (`01-esquemas.sql`, `02-tablas-prueba.sql`) |
+|---|---|---|
+| Esquemas | `cdm`, `results` y `staging` | `cdm` y `results` |
+| `search_path` | `ALTER DATABASE omop SET search_path TO cdm, results, public` | No lo configuro |
+| Tablas | Ninguna | Tablas de prueba (`cdm.person`, `results.conteo_pacientes`) |
+
+**Comprobación** (levanté `postgres:16` con solo el `00-schemas.sql` de la solución y `POSTGRES_DB=otra`):
+
+```text
+CREATE SCHEMA  (x3)
+ERROR:  database "omop" does not exist
+STATEMENT:  ALTER DATABASE omop SET search_path TO cdm, results, public;
+```
+
+El contenedor terminó con código de salida 3: el nombre `omop` está escrito a mano en el SQL, así que el `initdb` falla si `POSTGRES_DB` es otro. Mi `initdb` no depende del nombre de la base.
+
+En el sentido contrario, con su `search_path` se puede escribir `person` en lugar de `cdm.person`, y con el mío hay que calificar el esquema siempre (como hace `conectar.py`). Su esquema `staging` tampoco existe en el mío.
+
+- **Veredicto:** Mejor la mía en portabilidad y desacoplamiento (además de incluir las tablas de prueba pedidas en este lab); mejor la suya pensando en las sesiones futuras del curso (staging).
+- **Por qué:** El script de la solución acopla el SQL a un nombre de base de datos fijo (omop), rompiendo la inicialización con código de salida 3 si se parametriza otro nombre en .env (como clinico). Además, exigir el esquema explícito (cdm.person) en las consultas evita ambigüedades entre esquemas, aunque configurar el search_path ahorre escribir el prefijo.
+
+### Para cerrar
+
+Después de esta comparación, mantendría intactas mis decisiones de seguridad y aislamiento (el bind mount restringido a ./notebooks, la validación obligatoria con :? y el no fijar el nombre de la base en los scripts SQL). Lo único que incorporaría de la referencia pensando en el resto del curso es añadir CREATE SCHEMA IF NOT EXISTS staging; en 01-esquemas.sql para que mi stack sea compatible con las sesiones 10 a 18 sin tener que destruir el volumen más adelante. Si quisiera la comodidad del search_path sin acoplar el nombre de la base, lo configuraría a nivel de rol o usando un archivo .sh en initdb/ que lea la variable $POSTGRES_DB.
