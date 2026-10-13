@@ -10,6 +10,7 @@
 !s05-buenas-practicas-pytest/pyproject.toml
 !s05-buenas-practicas-pytest/uv.lock
 !s05-buenas-practicas-pytest/src/
+!s05-buenas-practicas-pytest/tests
 
 # 3. Volver a excluir las cachés que hayan entrado dentro de lo anterior
 #    (por ejemplo, dentro de src/):

@@ -1,6 +1,6 @@
-#Etapa 1: Imagen de construcción (builder)
+# --- Etapa 1: Imagen de construcción (builder) ---
 # 1. Imagen base
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
 # 2. Copiar el binario oficial de uv
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /bin/uv
@@ -19,20 +19,39 @@ COPY s05-buenas-practicas-pytest/src/ ./src/
 
 # 7. Instalar el paquete clinlab (capa ligera y rápida)
 RUN uv sync --frozen --no-dev --no-editable
-#etapa 2: Imagen final de ejecución
+
+
+# --- Etapa 2: Imagen de pruebas (test) ---
+FROM builder AS test
+
+# Instalar dependencias de desarrollo (usando --extra porque están en [project.optional-dependencies])
+RUN uv sync --frozen --extra dev
+
+# Copiar los tests al contenedor (requiere actualizar .dockerignore)
+COPY s05-buenas-practicas-pytest/tests/ ./tests/
+
+# Activar el entorno virtual para esta etapa
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Comando por defecto para correr los tests
+CMD ["pytest"]
+
+
+# --- Etapa 3: Imagen final de ejecución (producción) ---
 FROM python:3.12-slim
+
 WORKDIR /app
 
-
+# Crear usuario restringido
 RUN useradd -m appuser
 
-# Traer únicamente el entorno virtual ya construido desde la etapa anterior
-COPY --from=0 --chown=appuser:appuser /app/.venv /app/.venv
+# Traer únicamente el entorno virtual ya construido desde la etapa builder
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 
 # 8. Activar el entorno virtual para tiempo de ejecución
 ENV PATH="/app/.venv/bin:$PATH"
 
-#Usuario no root para seguridad
+# Usuario no root para seguridad
 USER appuser
 
 # 9. Comando por defecto al iniciar el contenedor
