@@ -315,3 +315,38 @@ El error está en el **servidor** de la base, no en el cliente. Al revisar los l
 ### Arreglo aplicado
 
 Revertí `.env` al valor original y ejecuté `up -d`: `ps` mostró ambos `healthy` y la conexión desde Jupyter volvió a funcionar.
+
+## Actividad 9 — La prueba real de reproducibilidad
+
+### Prueba en clon limpio (hecha por mí, en mi máquina)
+
+1. `docker compose --profile dev down -v`: borra contenedores, red y el volumen `pgdata` del stack original.
+2. `git clone` del repositorio en otra carpeta (`~/Documentos/lab7-clon-limpio/`): el clon no trae `.env`, como debe ser.
+3. `cp .env.example .env && docker compose up -d`, **sin ningún otro paso**.
+
+Resultado (con los valores de ejemplo de `.env.example`):
+
+- `db` y `jupyter` quedaron `healthy`; `up -d` tardó ~6 s porque las imágenes ya estaban en caché (una máquina sin caché tardará más).
+- `initdb` se ejecutó: existen los esquemas `cdm` y `results` y las tablas `cdm.person` y `results.conteo_pacientes`.
+- Jupyter se conectó a la base con las variables `PG*`.
+- El bind mount mostró `Untitled.ipynb`, `conectar.py` y `hola.py`, y se pudo **escribir** desde el contenedor.
+- Jupyter respondió HTTP 200 con el token; con `--profile dev`, Adminer respondió 200.
+
+### Pasos manuales encontrados
+
+Ninguno en el flujo. Sí había **requisitos implícitos** que no estaban escritos y ahora están en el `README.md`: Docker con Compose v2, puertos 5432/8888/8080 libres, uid 1000 para el bind mount, `--profile dev` también en `down`, y la advertencia de que la clave solo se lee al crear el volumen.
+
+### Limitaciones de esta prueba
+
+Mismo equipo, uid 1000 e imágenes en caché: no cubre otros uids, otros sistemas ni un primer build en frío. Por eso hace falta la prueba de un compañero.
+
+### Reporte del compañero
+
+[Pendiente: nombre o alias, sistema operativo, `id -u`, si necesitó algún paso fuera del README, errores y cuánto tardó. Pega aquí su reporte tal cual.]
+
+Lista para pasarle:
+
+1. `git clone <tu-repo>` y entrar en `s07-docker-compose/tu-entrega/stack`.
+2. Seguir **solo** el `README.md` (las tres líneas).
+3. Comprobar: `docker compose ps` (ambos `healthy`), abrir Jupyter con el token y ejecutar `psycopg.connect()`.
+4. Anotar cualquier cosa que haya tenido que adivinar o preguntar.
