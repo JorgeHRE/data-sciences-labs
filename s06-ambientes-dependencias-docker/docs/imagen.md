@@ -327,7 +327,69 @@ La manera segura de manejar variables sensibles es pasarlas únicamente cuando e
 
 **Moraleja:** En una imagen de Docker, borrar no es borrar; cada capa es permanente e inmutable. Lo que no debe estar en la imagen final, no debe entrar jamás en ninguna de sus capas.
 
-## 8. Escaneo de vulnerabilidades
+## 8. Escaneo de vulnerabilidades (CVE)
+
+### Herramienta y método
+
+Dado que `docker scout` no estaba disponible en el entorno, se optó por utilizar Trivy ejecutándolo como contenedor (`aquasec/trivy:latest`, versión 0.75.0). Para mantener el aislamiento y evitar exponer el socket de Docker (`/var/run/docker.sock`) a una herramienta de terceros, la imagen final se exportó previamente a un archivo:
+
+```bash
+docker save clinlab:final -o clinlab.tar
+```
+
+El escáner leyó directamente el archivo (`image --input clinlab.tar`) bajo los siguientes parámetros:
+* **Filtro:** `--severity CRITICAL,HIGH` (ignorando severidades medias y bajas).
+* **Salida:** Formato JSON para facilitar el análisis.
+* **Fecha de ejecución:** 13 de octubre de 2026 (descarga de base de datos de vulnerabilidades local de ~127 MB).
+* **Objetivo:** Imagen `clinlab:final` (307 MB, ejecutándose como `appuser`, detectada como Debian 13.7 con 87 paquetes del sistema).
+
+### Resultados del escaneo
+
+| Categoría | Cantidad |
+| :--- | :--- |
+| **Críticas** | 0 |
+| **Altas (filas en el reporte)** | 44 |
+| **CVE distintos** | 8 |
+| **Vulnerabilidades en Python (`.venv`)** | 0 |
+| **Vulnerabilidades del sistema operativo** | 44 |
+
+El reporte inicial de 44 vulnerabilidades altas resulta engañoso: el escáner imprime una fila por cada paquete afectado, no por cada vulnerabilidad única. Al agruparlas, solo existen **8 CVE distintos**. Por ejemplo, el paquete `util-linux` sufre de 4 CVE, pero al estar dividido en 9 sub-paquetes instalados, genera 36 filas de reporte por sí solo. 
+
+* **Hallazgo principal:** La totalidad de la superficie de ataque detectada proviene de la imagen base (`python:3.12-slim`), no del código de `clinlab` ni de sus dependencias en Python. Además, ninguna de las vulnerabilidades cuenta con una versión corregida publicada (`FixedVersion` vacío o `fix_deferred`).
+
+### Análisis y decisiones sobre las vulnerabilidades clave
+
+La puntuación estándar (CVSS) evalúa la gravedad teórica de la vulnerabilidad, pero el riesgo real depende de si ese componente es ejecutable o alcanzable en el contexto de nuestra aplicación. Se evaluaron las tres vulnerabilidades más representativas:
+
+| CVE y Paquete afectado | Tipo y Vector (CVSS) | Decisión y justificación |
+| :--- | :--- | :--- |
+| **CVE-2026-9538** (`perl-base`) | Agotamiento de memoria (DoS) mediante un archivo `.tar` malicioso. **Vector:** Red (7.5). | **Aceptar el riesgo:** Es la única de red (AV:N), pero nuestra aplicación no procesa ni descomprime archivos `.tar` enviados por usuarios. Su impacto se limita a disponibilidad. |
+| **CVE-2026-16742** (`libsystemd0`, `libudev1`) | Escalada de privilegios local a través de `systemd-homed`. **Vector:** Local (8.8). | **No aplicable:** Tiene el CVSS más alto, pero `systemd-homed` gestiona usuarios y directorios *home* en sistemas completos. Este servicio no se ejecuta dentro de nuestro contenedor. |
+| **CVE-2026-76642** (`util-linux`) | Escalada local por un error en asistentes (*helpers*) del comando `mount`. **Vector:** Local (7.8). | **Esperar y reconstruir:** es uno de los 4 CVE de util-linux, que juntos suman 36 de las 44 filas. Requiere ejecución local del comando `mount`, el cual no es utilizado por la app. Además, gracias a la Actividad 6, la app ya corre como usuario restringido (`appuser`). Se solventará cuando Debian libere el parche. |
+
+### Prueba de mitigación: actualización y reescaneo
+
+Para comprobar si existía un parche silencioso o una versión actualizada de la imagen base, se intentó descargar la versión más reciente y reconstruir el contenedor:
+
+1. `docker pull python:3.12-slim` indicó que la imagen local ya estaba al día (creada el 2026-10-06).
+2. Se reconstruyó la imagen `clinlab:final` y se volvió a escanear.
+3. **Resultado:** Se obtuvieron exactamente los mismos 44 registros de vulnerabilidad. Según la base de datos de Trivy no hay versión corregida, pero el contenedor mantiene su seguridad estructural al correr con `uid=1000(appuser)`.
+
+### Estrategia general frente a vulnerabilidades en contenedores
+
+Cuando las vulnerabilidades radican exclusivamente en la imagen base del sistema operativo, el curso de acción correcto incluye:
+* **Vigilancia y reconstrucción periódica:** Volver a construir la imagen tan pronto como el proveedor (Debian) emita los parches, asegurándose de usar etiquetas de versión inmutables para `uv` y un `.lock` determinista para evitar sorpresas.
+* **Integración en CI/CD:** Automatizar el escaneo en el proceso de integración continua para evitar que nuevas vulnerabilidades de dependencias pasen a producción.
+* **Evaluación de imágenes base reducidas:** Considerar distribuciones más austeras (como Alpine Linux o imágenes *Distroless* de Google). Menos paquetes instalados equivalen a menos CVE reportados. Sin embargo, como se vio en la actividad 4, Alpine funcionó con wheels precompilados, aunque no se corrieron los tests ahí.
+
+### Salvedades
+
+* **Confianza en el escáner:** La veracidad de los CVE y sus vectores recae en la base de datos local de Trivy utilizada al momento de la ejecución. No se corroboró cada código manualmente con el NVD.
+* **Severidades medias y bajas:** El filtro `--severity CRITICAL,HIGH` descarta vulnerabilidades menores que podrían ser de interés en auditorías estrictas.
+
+### Moraleja
+
+Un escáner de vulnerabilidades te dice estrictamente **qué** hay instalado en la imagen, pero no **si** puede ser explotado en tu contexto. Un número alarmante (como 44 alertas altas) casi siempre esconde un puñado de problemas subyacentes replicados por cada sub-paquete (8 CVE reales). La seguridad en contenedores no consiste en buscar una bandeja de entrada vacía, sino en analizar qué piezas son alcanzables, mitigar los riesgos arquitectónicos (ej. no correr como `root`) y decidir conscientemente cuándo aceptar el riesgo o cuándo cambiar la imagen base.
 
 ## 9. Pruebas dentro del contenedor
 
