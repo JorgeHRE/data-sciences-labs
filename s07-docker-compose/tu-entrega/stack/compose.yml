@@ -1,0 +1,34 @@
+# Stack clínico — actividad 1: Postgres + Adminer.
+# Se levanta con:  docker compose up -d
+
+services:
+  # --- Base de datos -------------------------------------------------------
+  db:
+    # Versión fija (no "latest"): así todos levantan exactamente lo mismo.
+    image: postgres:16
+    environment:
+      # Los valores salen del archivo .env (que NO se sube a git).
+      # La forma ${VAR:?msg} hace que "up" falle con un mensaje claro si falta.
+      POSTGRES_USER: ${POSTGRES_USER:?falta POSTGRES_USER en .env}
+      POSTGRES_DB: ${POSTGRES_DB:?falta POSTGRES_DB en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
+    volumes:
+      # Volumen con nombre: los datos sobreviven a "down" (no a "down -v").
+      - pgdata:/var/lib/postgresql/data
+    # SIN "ports": Postgres no se publica en la máquina. Adminer lo alcanza
+    # por la red interna de Compose usando el nombre del servicio ("db").
+    # Se publicará en 127.0.0.1:5432 en la actividad 2, si hace falta.
+
+  # --- Cliente web ---------------------------------------------------------
+  adminer:
+    image: adminer:4
+    depends_on:
+      - db
+    ports:
+      # Se publica SOLO en el loopback (127.0.0.1): únicamente esta máquina
+      # lo ve. Con "8080:8080" escucharía en todas las interfaces (0.0.0.0)
+      # y cualquiera en la red podría llegar al panel.
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  pgdata:
