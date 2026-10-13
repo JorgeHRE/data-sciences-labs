@@ -1,0 +1,19 @@
+# .dockerignore de la raíz del repo (lista blanca).
+# Se aplica a los Dockerfiles que NO tienen su propio <Dockerfile>.dockerignore
+# (por ejemplo, s06-ambientes-dependencias-docker/Dockerfile).
+# Recuerda: gana la ÚLTIMA regla que coincide.
+
+# 1. Excluir todo por defecto:
+*
+
+# 2. Des-excluir lo que el Dockerfile necesita (mira sus líneas COPY):
+!s05-buenas-practicas-pytest/pyproject.toml
+!s05-buenas-practicas-pytest/uv.lock
+!s05-buenas-practicas-pytest/src/
+
+# 3. Volver a excluir las cachés que hayan entrado dentro de lo anterior
+#    (por ejemplo, dentro de src/):
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.egg-info
