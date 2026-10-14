@@ -97,3 +97,54 @@ Pasar de un script exploratorio (`clientes/peticion_basica.py`) a una extracció
 
 ---
 
+
+## Actividad 3 — Paginación sin agotar la memoria
+
+Código: `clientes/paginacion.py` (generador y versión con lista) y `clientes/comparar_memoria.py` (medición). Salida en `evidencia/act3_memoria.txt`.
+
+### Qué se hizo
+- `generar_estudios()` es un generador: pide una página (100 estudios), entrega los estudios uno a uno con `yield` y, al agotarlos, sigue con el `nextPageToken`. La última página no trae token y termina.
+- `acumular_estudios()` consume el mismo generador y devuelve una lista con todo.
+- Se pidieron **500 registros** de ClinicalTrials.gov (condición `gastric cancer`), 5 páginas, con una pausa de 0.3 s entre páginas.
+- La memoria se midió con `tracemalloc` (pico de memoria), igual que en el laboratorio 2.
+
+### Resultados
+
+| Versión | Registros | Pico de memoria |
+|---|---|---|
+| Generador (procesa y descarta) | 500 | 22.36 MB |
+| Lista (acumula todo) | 500 | 45.06 MB |
+
+Ambas dieron el mismo resultado de la tarea de ejemplo (2 699 482 inscritos sumados), así que solo cambia el uso de memoria.
+
+### Demostración de que es un generador de verdad
+- `inspect.isgeneratorfunction(generar_estudios)` devuelve `True`.
+- Al crear el generador hizo **0 peticiones**; al pedir el primer estudio, **1**; tras consumir 100 estudios, seguía en **1**; al pedir el 101, subió a **2**. Solo trabaja cuando se le pide.
+
+### Matiz sobre la medición
+El pico del generador (22 MB) no es "un registro": es **una página** de 100 estudios más el JSON que se descarga y se parsea. La ventaja es que ese pico no crece con el total de registros, mientras que el de la lista sí. Con más registros, la diferencia entre ambos aumentaría. (No lo medí con otro tamaño: es lo esperado, no un resultado observado.)
+
+### Observaciones propias
+
+
+### 1. Demostración de evaluación perezosa (*lazy evaluation*)
+La inspección del contador de peticiones confirmó el comportamiento estrictamente perezoso de `generar_estudios()`:
+* Al instanciar el generador se registraron **0 peticiones**.
+* La primera petición a la API ocurrió únicamente al solicitar el primer elemento con `next()` o al iniciar la iteración.
+* Al terminar de consumir el estudio número 100, el contador se mantuvo en **1 petición**. La segunda petición se disparó recién al solicitar el **estudio 101**, demostrando que el generador solo consulta la red y resuelve el cursor (`nextPageToken`) cuando agota la página local y requiere el siguiente elemento.
+
+### 2. Por qué el generador consume 22 MB y no "casi cero"
+El generador redujo el pico de memoria a la mitad (22.36 MB frente a 45.06 MB de la lista), pero mantuvo un piso de 22 MB debido a la unidad de transferencia y al procesamiento de red:
+* **Retención por página completa:** La API entrega lotes de 100 estudios. Aunque el generador cede (`yield`) un estudio individual, la estructura anidada de la página completa permanece en el heap de Python hasta que se agota el lote.
+* **Coexistencia en memoria y buffers de red:** Dado que `tracemalloc.start()` se llamó después de importar las librerías (`requests`, `urllib3`), el pico no refleja la carga de módulos. Probablemente se debe a la coexistencia temporal en memoria del texto HTTP en bruto devuelto por el socket junto con el árbol de diccionarios ya deserializado por `.json()`, además de los buffers internos de la conexión TLS.
+
+### 3. Escalabilidad teórica vs. límite de la medición
+Con 500 registros, la lista acumuló las 5 páginas de forma simultánea, duplicando el consumo (45.06 MB):
+* En la lista, la memoria escala en función del total acumulado: $\mathcal{O}(N)$.
+* En el generador, el consumo se mantiene acotado al tamaño de la página activa: $\mathcal{O}(\text{tamaño\_página})$, permitiendo liberar la página previa para recolección de basura.
+* **Límite honesto del experimento:** La prueba se acotó a 500 registros (5 páginas). Por ello, la estabilidad del pico de memoria en volúmenes masivos es un comportamiento previsto teóricamente, no observado de manera empírica en esta corrida. Asimismo, `tracemalloc` midió únicamente las reservas del heap de Python a partir de su inicio, sin registrar el consumo total del proceso a nivel de sistema operativo.
+
+### 4. Relevancia para el procesamiento de datos de tesis
+Este patrón de consumo resulta clave al escalar la extracción a los **4,347 estudios de cáncer gástrico** disponibles:
+* **Prevención de desbordamiento:** Mediante una estimación lineal simple ($4\,347 / 500 \approx 8.7$), cargar todos los estudios en una única lista multiplicaría el pico de memoria por un factor cercano a 9 respecto a lo medido aquí, lo que incrementaría la competencia por RAM frente a procesos pesados en paralelo.
+* **Procesamiento en flujo (*streaming*):** El generador permite construir un pipeline donde cada estudio se procesa, filtra (e.g. seleccionando únicamente campos relevantes o criterios específicos) o se persiste en disco conforme llega, permitiendo descartar el resto del JSON de la memoria sin esperar la descarga de todo el catálogo.
