@@ -1,0 +1,11 @@
+Condición: 'gastric cancer' | registros pedidos: 500
+
+generador  registros= 500  inscritos_totales=2,699,482  pico de memoria= 22.36 MB
+lista      registros= 500  inscritos_totales=2,699,482  pico de memoria= 45.06 MB
+
+--- Demostración de pereza ---
+¿Es función generadora?: True
+Tras crear el generador, peticiones: 0
+Tras pedir el 1.er estudio, peticiones: 1
+Tras consumir 100 estudios, peticiones: 1
+Tras pedir el estudio 101, peticiones: 2
