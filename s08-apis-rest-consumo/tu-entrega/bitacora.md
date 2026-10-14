@@ -200,3 +200,49 @@ Para una recolección masiva de estudios clínicos o secuencias, configurar 3 re
 * **Margen de recuperación transitoria:** Permite sortear reinicios breves de servicios o micro-cortes de conexión sin abortar trabajos por lotes que llevan horas de ejecución.
 * **Tiempo acumulado acotado:** Con `urllib3` (2.8.0), la secuencia de pausas antes de cada reintento corresponde a `[0, 2.0, 4.0, 8.0]` segundos. Si se configuraran 4 reintentos (5 peticiones en total), la espera total sumaría exactamente 14.0 s; con 3 reintentos (4 peticiones), la espera acumulada es de apenas 6.0 s (`0 + 2.0 + 4.0`). Ambos márgenes son lo bastante ágiles como para no demorar el pipeline si un endpoint realmente quedó fuera de servicio.
 * **Transparencia en el diagnóstico:** Con `raise_on_status=False`, el adaptador devuelve la respuesta final para que el cliente genere un `HTTPError` estándar de `requests`. Esto conserva el objeto `response` íntegro y permite registrar en los logs el identificador exacto que falló para un reprocesamiento posterior.
+
+## Actividad 5 — Guardar el crudo
+
+Código: `clientes/crudo.py` (guardado con sobre de metadatos) y `clientes/descargar_crudo.py` (descarga de las tres fuentes). Salidas en `evidencia/act5_descarga.txt` y `evidencia/act5_verificacion.txt`. Los datos están en `data/raw/` (ignorado por git).
+
+### Qué se guardó
+Se descargó el 2026-10-14 y se guardó cada respuesta en su propio archivo JSON, **antes de transformar nada**.
+
+| Fuente | Archivos | Contenido | Tamaño |
+|---|---|---|---|
+| ClinicalTrials.gov | 44 | Todos los estudios de `gastric cancer`: 4 347, en páginas de 100 | 97 MB |
+| PubMed | 31 | Conteo de artículos por año (2000-2026, 27 consultas), los 500 IDs más recientes y su resumen (`esummary`) | 1.3 MB |
+| openFDA | 6 | Conteo de reacciones adversas de capecitabina con indicación gástrica sobre todos los reportes (5 759), más 500 reportes completos | 12 MB |
+
+Cada archivo lleva un "sobre" con la fuente, la fecha de descarga (UTC), si vino de la caché, la URL completa, los parámetros, el código HTTP y, aparte, la respuesta tal como llegó.
+
+### Verificación
+- ClinicalTrials.gov: 44 páginas, `totalCount` = 4 347, estudios guardados = 4 347 y NCT únicos = 4 347 (sin faltantes ni duplicados).
+- PubMed: 27 años contados y 500 resúmenes.
+- openFDA: 500 reportes completos y el conteo de reacciones.
+
+### Decisiones sobre el alcance
+- **ClinicalTrials.gov completo:** son 44 peticiones y unos 97 MB; la pregunta de los ensayos activos y su ubicación necesita todo el conjunto.
+- **openFDA, conteo en el servidor:** es más barato y exacto que bajar miles de reportes de 38 KB cada uno; la muestra de 500 reportes completos sirve para validar con Pydantic (actividad 6).
+- **PubMed por año:** el tope de `esearch` es 9,999 registros, así que la tendencia anual se obtiene con una consulta de conteo por año y no descargando artículos.
+- El año 2026 está incompleto (datos hasta el 14 de octubre).
+
+### Hallazgo: `limit=1000` en openFDA
+La documentación dice que el máximo es 1000, pero sin llave `limit=1000` devolvió **403 `API_KEY_MISSING`**; `limit=999` y los valores menores funcionaron. Se usó `limit=500` para el conteo y `limit=100` para los reportes.
+
+### Límites de lo guardado
+El campo `respuesta` es el JSON parseado y vuelto a escribir: es idéntico en contenido, pero no byte a byte (puede cambiar el espaciado o el escape de caracteres). Y la caché del cliente no sustituye al crudo: expira a las 24 h, mientras que `data/raw/` es un registro permanente de qué datos se usaron.
+
+### Observaciones propias
+
+### 1. Reproducibilidad frente a bases de datos vivas
+Bases como PubMed y ClinicalTrials.gov incorporan o modifican registros diariamente. Guardar la respuesta cruda congela una instantánea inmutable del conjunto de datos: sin este respaldo local, cualquier cifra o conteo reportado en la tesis (como los 4,347 estudios de hoy) dejaría de ser reproducible en corridas futuras al variar el catálogo remoto.
+
+### 2. Trazabilidad metodológica y desacoplamiento del pipeline
+El uso de un "sobre" de metadatos resuelve dos requerimientos analíticos fundamentales:
+* **Auditoría exacta de la consulta:** Registrar la URL original, los parámetros, el código HTTP y la marca temporal precisa —respetando la fecha de origen si proviene de caché— documenta el linaje completo del dato (*provenance*), permitiendo verificar o replicar el experimento bajo idénticas condiciones.
+* **Separación entre ingesta y transformación:** Desacopla la extracción web del análisis posterior. Si más adelante se corrigen criterios de filtrado, esquemas de tablas o scripts de procesamiento bioinformático, no es necesario volver a golpear las APIs ni arriesgarse a cambios en los datos remotos.
+
+### 3. Límites técnicos observados: la anomalía de OpenFDA y la fidelidad del archivo
+* **Comportamiento no documentado en OpenFDA:** Aunque la documentación oficial lista un tope de `limit=1000`, la API rechaza peticiones anónimas con ese valor devolviendo `HTTP 403 API_KEY_MISSING`, mientras que `limit=999` tiene éxito. Este hallazgo sugiere que la documentación y el comportamiento no coinciden tal como los leímos (quizá por un umbral estricto que exige autenticación al alcanzar el millar), justificando el ajuste pragmático en el código.
+* **Límite honesto de serialización:** Al recibir el JSON, parsearlo a estructura nativa de Python y reescribirlo en disco (`json.dump`), el contenido semántico y los valores son idénticos, y el orden de inserción de las claves se conserva. Sin embargo, el archivo resultante no preserva la igualdad byte a byte respecto a la respuesta original debido a diferencias en espaciado, des-escape de caracteres Unicode (e.g. `\u00e1` a `á`) y formateo numérico (donde `2.50` se serializa como `2.5` o `1e3` como `1000.0`), un detalle relevante a considerar al comparar representaciones de texto en datos científicos.

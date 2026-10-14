@@ -1,0 +1,24 @@
+ClinicalTrials.gov: 44 páginas | totalCount=4347 | estudios guardados=4347 | NCT únicos=4347
+
+Sobre de la página 2: {
+  "fuente": "clinicaltrials",
+  "descargado_en": "2026-10-14T17:50:23+00:00",
+  "desde_cache": false,
+  "url": "https://clinicaltrials.gov/api/v2/studies?query.cond=gastric+cancer&pageSize=100&countTotal=true&pageToken=ZVNj7o2Elu8o3lpzC8-7qrbumpOQJJxuZfWg2vAW",
+  "parametros": {
+    "query.cond": "gastric cancer",
+    "pageSize": 100,
+    "countTotal": "true",
+    "pageToken": "ZVNj7o2Elu8o3lpzC8-7qrbumpOQJJxuZfWg2vAW"
+  },
+  "http_status": 200
+}
+Traceback (most recent call last):
+  File "<stdin>", line 21, in <module>
+KeyError: '2000'
+
+PubMed: 27 años contados | publicaciones por año (muestra): {'2000': 1592, '2010': 2888, '2020': 4716, '2025': 4622, '2026': 3063}
+PubMed, resúmenes guardados: 500
+
+openFDA, 5 reacciones más reportadas: [('DIARRHOEA', 751), ('NAUSEA', 614), ('VOMITING', 547), ('DECREASED APPETITE', 387), ('DEATH', 386)]
+openFDA, reportes completos guardados: 500
