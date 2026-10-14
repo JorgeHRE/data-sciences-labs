@@ -1,0 +1,49 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /home/jorge/Documentos/data-sciences-labs/s08-apis-rest-consumo/tu-entrega/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/jorge/Documentos/data-sciences-labs/s08-apis-rest-consumo/tu-entrega
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1, platformdirs-4.13.0
+collecting ... collected 38 items
+
+tests/test_cliente.py::test_200_con_json_valido PASSED                   [  2%]
+tests/test_cliente.py::test_429_seguido_de_200_reintenta_y_termina_bien PASSED [  5%]
+tests/test_cliente.py::test_503_seguido_de_200_tambien_reintenta PASSED  [  7%]
+tests/test_cliente.py::test_500_persistente_se_rinde_tras_los_intentos PASSED [ 10%]
+tests/test_cliente.py::test_los_4xx_no_se_reintentan[400] PASSED         [ 13%]
+tests/test_cliente.py::test_los_4xx_no_se_reintentan[401] PASSED         [ 15%]
+tests/test_cliente.py::test_los_4xx_no_se_reintentan[404] PASSED         [ 18%]
+tests/test_cliente.py::test_un_post_no_se_reintenta_aunque_sea_500 PASSED [ 21%]
+tests/test_cliente.py::test_toda_peticion_lleva_timeout PASSED           [ 23%]
+tests/test_cliente.py::test_respeta_retry_after PASSED                   [ 26%]
+tests/test_cliente.py::test_la_politica_de_reintentos_esta_configurada_como_se_justifico PASSED [ 28%]
+tests/test_cliente.py::test_un_200_se_guarda_en_cache_y_no_vuelve_a_la_red PASSED [ 31%]
+tests/test_cliente.py::test_los_errores_no_se_guardan_en_cache[404] PASSED [ 34%]
+tests/test_cliente.py::test_los_errores_no_se_guardan_en_cache[500] PASSED [ 36%]
+tests/test_cliente.py::test_la_red_real_esta_bloqueada PASSED            [ 39%]
+tests/test_modelos.py::test_estudio_valido_se_normaliza PASSED           [ 42%]
+tests/test_modelos.py::test_falta_el_identificador_se_rechaza PASSED     [ 44%]
+tests/test_modelos.py::test_inscritos_negativos_se_rechazan PASSED       [ 47%]
+tests/test_modelos.py::test_sin_inscritos_es_valido_y_queda_en_none PASSED [ 50%]
+tests/test_modelos.py::test_estado_fuera_del_conjunto_oficial_se_rechaza PASSED [ 52%]
+tests/test_modelos.py::test_fin_anterior_al_inicio_se_rechaza PASSED     [ 55%]
+tests/test_modelos.py::test_fin_con_solo_mes_del_mismo_mes_de_inicio_es_valido PASSED [ 57%]
+tests/test_modelos.py::test_reporte_valido_convierte_decadas_a_anios PASSED [ 60%]
+tests/test_modelos.py::test_reportes_malformados_se_rechazan[cambio0-edad_anios] PASSED [ 63%]
+tests/test_modelos.py::test_reportes_malformados_se_rechazan[cambio1-fecha_recepcion] PASSED [ 65%]
+tests/test_modelos.py::test_reportes_malformados_se_rechazan[cambio2-futuro] PASSED [ 68%]
+tests/test_modelos.py::test_reportes_malformados_se_rechazan[cambio3-reacciones] PASSED [ 71%]
+tests/test_modelos.py::test_reportes_malformados_se_rechazan[cambio4-id_reporte] PASSED [ 73%]
+tests/test_modelos.py::test_resumen_valido PASSED                        [ 76%]
+tests/test_modelos.py::test_articulo_con_numero_impreso_del_anio_siguiente_es_valido PASSED [ 78%]
+tests/test_modelos.py::test_resumenes_malformados_se_rechazan[cambio0-anio] PASSED [ 81%]
+tests/test_modelos.py::test_resumenes_malformados_se_rechazan[cambio1-anio] PASSED [ 84%]
+tests/test_modelos.py::test_resumenes_malformados_se_rechazan[cambio2-uid] PASSED [ 86%]
+tests/test_modelos.py::test_resumenes_malformados_se_rechazan[cambio3-uid] PASSED [ 89%]
+tests/test_modelos.py::test_json_con_campo_faltante_llega_por_la_red_y_pydantic_lo_rechaza PASSED [ 92%]
+tests/test_paginacion.py::test_recorre_todas_las_paginas_siguiendo_el_token PASSED [ 94%]
+tests/test_paginacion.py::test_es_perezoso_no_pide_nada_hasta_que_se_le_pide PASSED [ 97%]
+tests/test_paginacion.py::test_maximo_corta_a_mitad_de_pagina_y_no_pide_la_siguiente PASSED [100%]
+
+============================== 38 passed in 0.11s ==============================

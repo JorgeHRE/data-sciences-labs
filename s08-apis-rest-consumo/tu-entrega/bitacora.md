@@ -369,3 +369,59 @@ La serie temporal de artículos indexados bajo el descriptor MeSH *Stomach Neopl
 La experiencia al desanidar estructuras jerárquicas dejó dos lecciones técnicas fundamentales:
 * **Fallas silenciosas vs. Excepciones:** Mientras que los 376 estudios sin sedes levantaron un error explícito en `record_path` que obligó a contemplar ramas vacías, la extracción con rutas anidadas en `meta` derivó en una falla inadvertida: 39,474 registros con identificador nulo (`NaN`). Este tipo de anomalía asintomática, que no interrumpe la ejecución pero invalida por completo el enlace relacional entre entidades, demuestra la necesidad de auditar formalmente la cardinalidad y la integridad referencial tras cada transformación tabular.
 * **Normalización de cadenas en cruces de datos:** La discrepancia de mayúsculas entre las reacciones de openFDA y los registros locales evidenció la necesidad de homogeneizar el texto libre (mediante transformaciones uniformes como `.str.upper()` en el código) antes de ejecutar agregaciones o combinaciones relacionales.
+
+## Actividad 8 — Pruebas sin red
+
+Código: `tests/conftest.py`, `tests/test_cliente.py`, `tests/test_modelos.py` y `tests/test_paginacion.py`. Evidencia en `evidencia/act8_pytest_con_red.txt`, `evidencia/act8_pytest_sin_red.txt` y `evidencia/act8_pytest_wifi_apagado.txt`.
+
+### Qué se hizo
+- **38 pruebas, 0.13 s.** Las respuestas del servidor las simula `responses`; ninguna prueba depende de `data/` (llevan sus propios datos mínimos incrustados, porque `data/` no se sube a git).
+- **Bloqueo explícito de la red** (`conftest.py`): cualquier prueba que intente resolver un nombre o abrir una conexión real falla con `RedBloqueada`. Hay una prueba que comprueba que el propio bloqueo funciona.
+- **Cliente de prueba con `backoff=0`:** los reintentos no esperan, así que la suite es instantánea.
+
+### Los cinco casos que pide el enunciado
+
+| Caso | Prueba | Qué comprueba |
+|---|---|---|
+| 200 con JSON válido | `test_200_con_json_valido` | devuelve el JSON, 1 petición |
+| 429 → 200 | `test_429_seguido_de_200_reintenta_y_termina_bien` | 2 peticiones y resultado correcto |
+| 500 persistente | `test_500_persistente_se_rinde_tras_los_intentos` | 4 peticiones (1 + 3 reintentos) y `HTTPError` |
+| 404 | `test_los_4xx_no_se_reintentan[404]` (también 400 y 401) | **1 sola petición** |
+| JSON con campo faltante | `test_json_con_campo_faltante_llega_por_la_red_y_pydantic_lo_rechaza` | el servidor responde 200, pero Pydantic rechaza el registro sin `nct_id` |
+
+Además se prueba: 503 → 200, que un `POST` no se reintenta, que toda petición lleva `timeout=(5, 30)`, la caché (el 200 se guarda; 404 y 500 no), las reglas de los tres modelos y el generador de paginación (perezoso, sigue el token, respeta el máximo).
+
+### Verificación sin red
+- **Entorno sin ninguna interfaz de red:** se ejecutó `pytest` con `unshare -rn` (un *network namespace* vacío, donde cualquier conexión da `Network is unreachable`): **38 pasaron**. Salida en `evidencia/act8_pytest_sin_red.txt`.
+- **Con el wifi apagado (verificación pedida por el enunciado):** Se ejecutó `.venv/bin/pytest -v` con la interfaz inalámbrica y de red desconectadas físicamente: **38 pasaron en 0.11 s**. Confirma que la suite opera 100% aislada en memoria sin fugas accidentales a la red. Salida registrada en `evidencia/act8_pytest_wifi_apagado.txt`.
+
+### ¿Las pruebas detectan errores de verdad?
+Se rompió el cliente a propósito de cuatro maneras y se comprobó que las pruebas fallan (después se restauró el código):
+
+| Rotura provocada | Pruebas que fallaron |
+|---|---|
+| Reintentar también los 404 | `test_los_4xx_no_se_reintentan[404]` y la de configuración |
+| Cachear también los 404 y 500 | `test_los_errores_no_se_guardan_en_cache` (404 y 500) |
+| Quitar el `timeout` | `test_toda_peticion_lleva_timeout` |
+| Reintentar también los `POST` | `test_un_post_no_se_reintenta...` y la de configuración |
+
+### Hallazgo: `responses` simula los reintentos pero no duerme
+La biblioteca implementa por su cuenta el conteo de reintentos (respeta `status_forcelist`, `allowed_methods` y `total`), pero **nunca llama a `sleep`**. Por eso no se puede observar con ella la espera de `Retry-After`: una primera versión de la prueba que lo intentaba falló (esperas capturadas = `[]`) y se rehízo. Lo que se prueba ahora es que el cliente está **configurado** para obedecer `Retry-After` y que `urllib3` lo interpreta como 7 segundos; la espera real se comprobó en la actividad 4 con un servidor local (1.0 s).
+
+## Observaciones propias
+
+### 1. El riesgo metodológico de depender de la red viva en pruebas automatizadas
+Hacer que una suite de pruebas dependa de peticiones reales a internet introduce tres debilidades críticas:
+* **Fragilidad e indeterminismo (*flakiness*):** La prueba deja de evaluar exclusivamente la corrección lógica del código y pasa a depender de factores ajenos: cortes momentáneos de conectividad, latencia del proveedor, mantenimiento de los servidores del NCBI/NIH o cuotas de tasa por IP. Un fallo en el test no indicaría un bug en el cliente, sino ruido ambiental.
+* **Tiempo de ejecución incompatible con integración continua:** Las 38 pruebas unitarias se ejecutaron en apenas 0.13 segundos gracias a la intercepción en memoria. Consultar los servidores remotos para cada caso de prueba habría añadido segundos de latencia por petición y pausas de red acumuladas, desalentando la ejecución continua durante el desarrollo.
+* **Aislamiento mediante bloqueo estricto:** El bloqueo explícito a nivel de sockets en `conftest.py` y la posterior verificación con la interfaz de red desconectada  (unicamente 38/38 aprobadas) garantizan hermeticidad total: no existe fuga accidental de tráfico hacia el exterior ni dependencia de datos residentes en `data/raw/`.
+
+### 2. Simulación controlada frente a la provocación en APIs reales: el caso del `HTTP 429`
+Intentar probar el manejo de `HTTP 429` o `500` directamente contra las APIs oficiales de ClinicalTrials.gov u openFDA resulta inviable y metodológicamente cuestionable:
+* **Imposibilidad de reproducibilidad:** No es posible forzar a demanda que un servidor institucional de producción devuelva una secuencia exacta de `429` seguida de `200` o una cabecera `Retry-After` arbitraria sin incurrir en abusos de servicio o bloqueos prolongados de IP.
+* **Comprensión de los límites de las herramientas de simulación:** Utilizar `responses` permitió validar con exactitud el flujo de decisión del cliente (verificar que se realizaron dos llamadas internas y que el estado final fue exitoso). Al mismo tiempo, evidenció los límites del simulador: `responses` intercepta el transporte a nivel lógico pero no invoca `time.sleep`, por lo que la medición de pausas físicas debe verificarse mediante la configuración del objeto `Retry` o servidores locales de prueba (como se hizo en la Actividad 4), no asumiendo que el mock replica el reloj del sistema operativo.
+
+### 3. Validez de la suite mediante pruebas de mutación
+Un conjunto de pruebas que siempre arroja un resultado aprobatorio (100% verde) no demuestra robustez si sus aserciones son triviales o permisivas:
+* **Evaluación de la sensibilidad de los tests:** Al alterar deliberadamente el cliente con cuatro mutaciones estructurales (reintentar sobre un código no recuperable como `404`, persistir respuestas de error en la caché, omitir la obligatoriedad de `timeout` y permitir reintentos en métodos no seguros como `POST`), las pruebas fallaron de inmediato en cada escenario.
+* **Garantía contra regresiones:** Este resultado valida que las aserciones no solo comprueban el "camino feliz", sino que vigilan de manera estricta las fronteras de diseño del cliente HTTP. Si en futuras modificaciones del proyecto se introduce un cambio que vulnere la idempotencia o la política de caché, la suite alertará del fallo antes de que el código llegue a producción o se aplique en pipelines masivos de extracción.
