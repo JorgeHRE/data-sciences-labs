@@ -1,0 +1,7 @@
+estudios                 4347 filas x 9 columnas -> data/procesado/estudios.parquet
+estudios_paises          6720 filas x 2 columnas -> data/procesado/estudios_paises.parquet
+ubicaciones             39474 filas x 4 columnas -> data/procesado/ubicaciones.parquet
+reportes                  500 filas x 4 columnas -> data/procesado/reportes.parquet
+reportes_reacciones      1539 filas x 2 columnas -> data/procesado/reportes_reacciones.parquet
+reacciones_servidor       500 filas x 2 columnas -> data/procesado/reacciones_servidor.parquet
+pubmed_por_anio            27 filas x 3 columnas -> data/procesado/pubmed_por_anio.parquet

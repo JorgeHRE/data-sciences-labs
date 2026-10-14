@@ -310,3 +310,62 @@ Omitir la validación y transformación previa al análisis downstream generarí
 Que los 5,347 registros reales descargados hayan superado la validación sin un solo rechazo no implica que las fuentes gocen de una curación exhaustiva:
 * **Cumplimiento de reglas mínimas vs. completitud:** El resultado demuestra únicamente que los datos satisfacen las restricciones obligatorias que definimos, las cuales son deliberadamente permisivas con los campos opcionales. La validación no detecta la omisión de datos: 60 estudios sin inscritos, 376 sin país y 116 reportes de openFDA sin edad pasaron el filtro sin alertar. Esto es crítico para los conteos por país de la Actividad 7, donde esos 376 registros quedarán forzosamente excluidos. Además, tratándose de openFDA, los reportes provienen de farmacovigilancia espontánea, sujetos a alta heterogeneidad de llenado.
 * **El valor de las pruebas con errores inducidos:** La efectividad del esquema no se demostró con los datos reales —cuyos `.jsonl` de rechazos quedaron vacíos—, sino al confrontar los modelos contra los 10 registros corrompidos a propósito en `clientes/inducidos.py`. Como quedó registrado en la salida de `evidencia/act6_inducidos.txt`, cada violación (de rango, pertenencia al conjunto de 14 estados oficiales o ausencia de campos requeridos) disparó el error correspondiente, garantizando que el pipeline cuenta con poder de discriminación ante eventuales actualizaciones de esquemas o valores fuera de norma.
+
+## Actividad 7 — Consolidar
+
+Código: `clientes/consolidar.py` (DataFrames y Parquet) y `notebooks/consolidado.ipynb` (análisis, ejecutado y guardado con sus resultados). Salida en `evidencia/act7_parquet.txt`. Los Parquet están en `data/procesado/` (ignorado por git).
+
+### Qué se hizo
+- Los DataFrames se construyen **desde los modelos ya validados** (actividad 6), así que los tipos son limpios: fechas reales, edad en años, estado como categoría.
+- `pd.json_normalize` se usó donde el JSON anidado conviene aplanarlo tal cual: las sedes de cada estudio (`record_path` + `meta`) y el conteo de reacciones de openFDA.
+- Tablas "largas" en vez de listas dentro de celdas:
+
+| Tabla | Filas | Contenido |
+|---|---|---|
+| `estudios` | 4 347 | un estudio por fila (estado, inscritos, fechas, si es activo) |
+| `estudios_paises` | 6 720 | un par estudio-país |
+| `ubicaciones` | 39 474 | una sede por fila (país, ciudad), hecha con `json_normalize` |
+| `reportes` | 500 | un reporte de openFDA por fila (edad en años) |
+| `reportes_reacciones` | 1 539 | un par reporte-reacción |
+| `reacciones_servidor` | 500 | conteo de reacciones sobre todos los reportes |
+| `pubmed_por_anio` | 27 | publicaciones por año, con el último año marcado como parcial |
+
+### Comprobación cruzada
+Los pares estudio-país obtenidos de los modelos validados y los obtenidos con `json_normalize` son **idénticos** (3 971 estudios con país), así que las dos rutas coinciden.
+
+### Dos trampas de `json_normalize` (encontradas al hacerlo)
+1. **`record_path` exige que todos los elementos tengan esa ruta.** Los 376 estudios sin sedes lo rompieron (`KeyError: 'locations'`); hubo que filtrarlos antes.
+2. **Con una ruta anidada en `meta`, falló en silencio.** `errors="ignore"` rellenó el identificador del estudio con `NaN` en las 39 474 filas, sin aviso, porque pandas buscó `nctId` relativo a cada sede. Con `errors="raise"` sí avisa. La solución fue subir el identificador al nivel superior y usar `errors="raise"`.
+
+### Decisión sobre 2026 en PubMed
+Los datos de 2026 llegan hasta el 14 de octubre. En lugar de recortar el análisis a 2025, se **documenta el alcance**: la tendencia se describe con los años completos (2000-2025) y 2026 se muestra aparte, marcado como parcial, para que no parezca un descenso real.
+
+### Resultados (detalle y gráficas en el notebook)
+- **Ensayos activos:** 1 291 de 4 347 (30 %). Por país lideran China (516), Estados Unidos (348) y Corea del Sur (126). 131 de los activos no tienen país y quedan fuera del análisis geográfico.
+- **Eventos adversos de capecitabina** (5 759 reportes con indicación gástrica): diarrea (13.0 %), náusea (10.7 %) y vómito (9.5 %) encabezan la lista; el síndrome mano-pie (eritrodisestesia palmo-plantar) aparece en 5.7 %. Sin denominador, no se estima incidencia.
+- **PubMed:** de 1 592 publicaciones en 2000 a 4 622 en 2025 (×2.9); el máximo entre años completos es 2022 (4 836) y de 2015 a 2025 el crecimiento es de solo ×1.08. 2026 (parcial) lleva 3 063.
+
+## Observaciones propias
+
+### 1. Interpretación farmacológica y oncológica de los eventos adversos (openFDA)
+La distribución de eventos adversos refleja el perfil toxicológico conocido de la capecitabina, pero requiere cautela analítica al distinguir toxicidad farmacológica de desenlaces oncológicos:
+* **Toxicidad gastrointestinal y dermatológica concordante:** La diarrea (13.0 %) y el síndrome mano-pie (eritrodisestesia palmo-plantar, 5.7 %) representan las toxicidades dosis-limitantes clásicas del fármaco, mientras que la náusea y el vómito suelen manifestarse con menor severidad clínica sin condicionar habitualmente la interrupción del tratamiento. La capecitabina actúa como un profármaco del 5-fluorouracilo (5-FU) activado intratumoralmente por la timidina fosforilasa; el daño directo al epitelio intestinal por recambio celular rápido sustenta la afección digestiva, mientras que el mecanismo molecular exacto del síndrome mano-pie aún no se encuentra plenamente esclarecido en la literatura (atribuyéndose de forma preliminar a la acumulación local de metabolitos o a la expresión enzimática diferencial en palmas y plantas).
+* **Confusión entre evento adverso y progresión tumoral:** La presencia de "muerte" y "progresión de la enfermedad" dentro de los reportes evidencia los límites intrínsecos de MedDRA y los sistemas de notificación espontánea (FAERS/openFDA). En pacientes con adenocarcinoma gástrico avanzado, el fallecimiento y la progresión reflejan la evolución natural de la enfermedad subyacente y no necesariamente un efecto adverso atribuible al fármaco.
+* **Frecuencia relativa vs. Incidencia real:** Al no disponer del denominador total de pacientes tratados con capecitabina (la cohorte real expuesta), estos porcentajes solo cuantifican la frecuencia relativa dentro de las notificaciones enviadas al sistema, no una tasa de incidencia epidemiológica.
+
+### 2. Geografía de los ensayos clínicos activos: consideraciones epidemiológicas y sesgos de registro
+La concentración de ensayos activos en China (516), Estados Unidos (348) y Corea del Sur (126) permite plantear hipótesis tanto epidemiológicas como operativas:
+* **Hipótesis epidemiológica en Asia Oriental:** La alta prevalencia de cáncer gástrico en la región —ampliamente asociada a cepas virulentas de *Helicobacter pylori* (como CagA positiva) y factores dietéticos específicos— ofrece una base poblacional amplia para el reclutamiento. No obstante, los datos analizados corresponden únicamente a conteos de sedes registradas y no permiten establecer una relación causal directa con determinantes biológicos.
+* **El sesgo de registro (el caso de Japón):** A pesar de que Japón presenta una de las tasas de incidencia más elevadas del mundo, figura en la séptima posición con solo 73 estudios. Esto subraya que ClinicalTrials.gov no representa un censo exhaustivo global: en Japón, gran parte de la investigación clínica local se inscribe preferentemente en registros nacionales integrados a la red primaria de la OMS (JAPIC, JMACCT o UMIN-CTR), lo que introduce un sesgo de cobertura territorial en la plataforma de la NLM.
+* **Capacidad de inversión:** El liderazgo conjunto de China y Estados Unidos refleja primordialmente la concentración de infraestructura biofarmacéutica y grandes centros oncológicos con capacidad económica y regulatoria para sostener estudios multicéntricos.
+
+### 3. Dinámica temporal en PubMed: estancamiento histórico y sesgos de indexación
+La serie temporal de artículos indexados bajo el descriptor MeSH *Stomach Neoplasms* exhibe una dinámica más compleja que una simple caída reciente:
+* **Cronología de la meseta (2014–2025):** Tras un incremento sostenido a inicios de siglo (crecimiento de ×1.52 entre 2010 y 2014, pasando de 2,888 a 4,381 artículos), el volumen global entró en una meseta prolongada (factor de ×1.08 entre 2015 y 2025). Dicha meseta tuvo oscilaciones marcadas: una contracción hacia 2017 (3,974), una recuperación sostenida entre 2018 y 2022 (alcanzando el pico máximo histórico de 4,836), y un posterior reajuste a la baja entre 2023 y 2025 (~4,630 artículos; un factor de ×0.98 respecto a 2020).
+* **Consistencia del descriptor temático:** La estabilización del volumen total no puede explicarse simplemente por el auge de nuevas modalidades terapéuticas (inmunoterapia o terapias dirigidas), ya que el descriptor MeSH *Stomach Neoplasms* engloba la patología en su conjunto independientemente del enfoque experimental. Más que un abandono del área, la meseta general sugiere una maduración en la tasa global de publicaciones del campo o un desplazamiento en la terminología primaria empleada.
+* **Retraso de curación (*indexing lag*) y corte de 2026:** Mantener 2026 documentado como año parcial (3,063 artículos acumulados a octubre) previene interpretaciones erróneas de desplome. Adicionalmente, debe considerarse la latencia inherente del NCBI en la asignación manual de términos MeSH a publicaciones recientes (frecuentemente indexadas inicialmente solo como registros en proceso), lo que explica que el volumen a tres cuartos de año quede por debajo de la proporción lineal esperada.
+
+### 4. Vulnerabilidad en transformaciones complejas: la trampa silenciosa de `json_normalize`
+La experiencia al desanidar estructuras jerárquicas dejó dos lecciones técnicas fundamentales:
+* **Fallas silenciosas vs. Excepciones:** Mientras que los 376 estudios sin sedes levantaron un error explícito en `record_path` que obligó a contemplar ramas vacías, la extracción con rutas anidadas en `meta` derivó en una falla inadvertida: 39,474 registros con identificador nulo (`NaN`). Este tipo de anomalía asintomática, que no interrumpe la ejecución pero invalida por completo el enlace relacional entre entidades, demuestra la necesidad de auditar formalmente la cardinalidad y la integridad referencial tras cada transformación tabular.
+* **Normalización de cadenas en cruces de datos:** La discrepancia de mayúsculas entre las reacciones de openFDA y los registros locales evidenció la necesidad de homogeneizar el texto libre (mediante transformaciones uniformes como `.str.upper()` en el código) antes de ejecutar agregaciones o combinaciones relacionales.
