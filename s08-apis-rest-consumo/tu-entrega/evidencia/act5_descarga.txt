@@ -1,0 +1,3 @@
+clinicaltrials   44 archivos en data/raw/clinicaltrials/  (26 s)
+pubmed           31 archivos en data/raw/pubmed/  (24 s)
+openfda           6 archivos en data/raw/openfda/  (4 s)
