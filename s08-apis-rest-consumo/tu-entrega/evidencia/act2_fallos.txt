@@ -1,0 +1,26 @@
+=== Fallo 1: sin raise_for_status(), NCT inexistente ===
+status_code: 404
+Content-Type: text/plain; charset=UTF-8
+cuerpo (primeros 200 car.): NCT number NCT99999999 not found
+-> JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+=== Fallo 2: concatenar la URL a mano ===
+URL que se envió: https://clinicaltrials.gov/api/v2/studies?query.cond=c%C3%A1ncer%20g%C3%A1strico&pageSize=1
+status_code: 200
+cuerpo (primeros 200 car.): {"studies":[
+{"protocolSection":{"identificationModule":{"nctId":"NCT07504913","orgStudyIdInfo":{"id":"2024/11553/I"},"organization":{"fullName":"Parc de Salut Mar","class":"OTHER"},"briefTitle":"Span
+
+--- Misma búsqueda con params= ---
+URL que se envió: https://clinicaltrials.gov/api/v2/studies?query.cond=c%C3%A1ncer+g%C3%A1strico&pageSize=1&countTotal=true
+status_code: 200 | totalCount: 2
+
+--- Para comparar: lo mismo en inglés ---
+totalCount: 4347
+
+=== Fallo 2b: valor con '&' al concatenar a mano ===
+URL enviada: https://clinicaltrials.gov/api/v2/studies?query.cond=gastric%20cancer&query.intr=capecitabine%20&%20oxaliplatin&pageSize=1&countTotal=true
+status_code: 400 | cuerpo: ` oxaliplatin` is unknown parameter
+
+--- Con params= ---
+URL enviada: https://clinicaltrials.gov/api/v2/studies?query.cond=gastric+cancer&query.intr=capecitabine+%26+oxaliplatin&pageSize=1&countTotal=true
+status_code: 200 | totalCount: 320
