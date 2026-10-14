@@ -1,0 +1,31 @@
+=== FALLOS INDUCIDOS (no son datos reales) ===
+
+[RECHAZADO] CT: inscritos negativos (-50)
+    motivo: inscritos: Input should be greater than or equal to 0
+
+[RECHAZADO] CT: fin (2023-01-10) anterior al inicio (2024-07-15)
+    motivo: : Value error, la fecha de fin (2023-01-10) es anterior a la de inicio (2024-07-15)
+
+[RECHAZADO] CT: estado fuera del conjunto oficial
+    motivo: estado: Input should be 'ACTIVE_NOT_RECRUITING', 'COMPLETED', 'ENROLLING_BY_INVITATION', 'NOT_YET_RECRUITING', 'RECRUITING', 'SUSPENDED', 'TERMINATED', 'WITHDRAWN', 'AVAILABLE', 'NO_LONGER_AVAILABLE', 'TEMPORARILY_NOT_AVAILABLE', 'APPROVED_FOR_MARKETING', 'WITHHELD' or 'UNKNOWN'
+
+[RECHAZADO] CT: falta el identificador NCT (campo obligatorio)
+    motivo: nct_id: Field required
+
+[RECHAZADO] CT: fecha inexistente (mes 13)
+    motivo: inicio_txt: Value error, month must be in 1..12
+
+[RECHAZADO] FDA: edad de 150 años
+    motivo: edad_anios: Input should be less than or equal to 120
+
+[RECHAZADO] FDA: fecha con formato ISO en vez de YYYYMMDD
+    motivo: fecha_recepcion: Value error, fecha con formato inesperado: '2024-03-12' (se esperaba YYYYMMDD)
+
+[RECHAZADO] FDA: reporte sin reacciones
+    motivo: reacciones: List should have at least 1 item after validation, not 0
+
+[RECHAZADO] PubMed: año 1750
+    motivo: anio: Value error, año de publicación fuera de rango: 1750
+
+[RECHAZADO] PubMed: falta el uid
+    motivo: uid: Field required

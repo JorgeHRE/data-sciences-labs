@@ -1,0 +1,7 @@
+openFDA, edad en décadas: crudo='8' unidad=800 -> edad_anios=80.0
+openFDA: 384 con edad, rango 24-88 años | 116 sin edad (opcional)
+
+CT.gov: inicio solo mes=1419 | fin solo mes=1646 | sin inscritos=60 | sin país=376 | sin inicio=16
+CT.gov, estados: {'NOT_YET_RECRUITING': 271, 'UNKNOWN': 1108, 'COMPLETED': 1538, 'RECRUITING': 732, 'TERMINATED': 293, 'ACTIVE_NOT_RECRUITING': 254, 'WITHDRAWN': 85, 'ENROLLING_BY_INVITATION': 34, 'NO_LONGER_AVAILABLE': 2, 'SUSPENDED': 24, 'AVAILABLE': 4, 'APPROVED_FOR_MARKETING': 2}
+
+PubMed, años: {2026: 495, 2027: 5}

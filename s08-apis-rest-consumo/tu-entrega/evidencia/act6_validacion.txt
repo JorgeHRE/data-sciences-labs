@@ -1,0 +1,4 @@
+fuente           llegaron  válidos rechazados
+clinicaltrials       4347     4347          0
+openfda               500      500          0
+pubmed                500      500          0
