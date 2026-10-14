@@ -82,8 +82,9 @@ FUENTES = {"clinicaltrials": clinicaltrials, "pubmed": pubmed, "openfda": openfd
 
 if __name__ == "__main__":
     elegidas = sys.argv[1:] or list(FUENTES)
-    with ClienteHTTP(directorio_cache="data/cache") as cliente:
+    with ClienteHTTP(directorio_cache="data/cache", registro="data/logs/peticiones.jsonl") as cliente:
         for nombre in elegidas:
             t0 = time.perf_counter()
             archivos = FUENTES[nombre](cliente)
             print(f"{nombre:<15} {archivos:>3} archivos en data/raw/{nombre}/  ({time.perf_counter() - t0:.0f} s)")
+        print(f"Peticiones reales: {cliente.reales} | servidas por caché: {cliente.de_cache}")

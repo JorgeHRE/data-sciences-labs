@@ -133,3 +133,31 @@ def test_la_red_real_esta_bloqueada(cliente):
 
     with pytest.raises(RedBloqueada):
         cliente.get("https://clinicaltrials.gov/api/v2/studies")
+
+
+# --- Actividad 9: contadores de peticiones reales y de caché -----------------
+# Nota: `responses` no rellena `raw.retries`, así que aquí solo se prueba la
+# parte de caché y el caso sin reintentos; el conteo con reintentos se verifica
+# contra un servidor local real en clientes/verificar_contador.py.
+
+@responses.activate
+def test_contador_distingue_red_y_cache(tmp_path):
+    responses.add(responses.GET, "https://api.test/x", json={"ok": 1})
+    with ClienteHTTP(directorio_cache=tmp_path, reintentos=0, backoff=0) as c:
+        for _ in range(3):
+            c.get("https://api.test/x")
+        assert (c.reales, c.de_cache) == (1, 2)
+    assert len(responses.calls) == 1  # y el "servidor" vio una sola petición
+
+
+@responses.activate
+def test_registro_jsonl_anota_cada_evento(tmp_path):
+    import json
+    responses.add(responses.GET, "https://api.test/x", json={})
+    archivo = tmp_path / "log" / "p.jsonl"
+    with ClienteHTTP(directorio_cache=tmp_path / "c", reintentos=0, backoff=0, registro=archivo) as c:
+        c.get("https://api.test/x")
+        c.get("https://api.test/x")
+    eventos = [json.loads(l) for l in archivo.read_text().splitlines()]
+    assert [e["evento"] for e in eventos] == ["red", "cache"]
+    assert all(e["host"] == "api.test" for e in eventos)

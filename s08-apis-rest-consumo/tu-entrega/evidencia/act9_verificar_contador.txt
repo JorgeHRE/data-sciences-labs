@@ -1,0 +1,9 @@
+caso                    servidor recibió  contador reales  ¿coincide?
+/200                                   1                1          sí
+/429-luego-200                         2                2          sí
+/500-siempre                           4                4          sí
+/404                                   1                1          sí
+
+5 × /200 con caché: servidor recibió 1, reales=1, de caché=4  -> OK
+
+RESULTADO: el contador coincide con el servidor
