@@ -11,7 +11,7 @@ Dos versiones de lo mismo para poder comparar su uso de memoria:
 import time
 from collections.abc import Iterator
 
-import requests
+from clientes.base import ClienteHTTP
 
 URL = "https://clinicaltrials.gov/api/v2/studies"
 
@@ -21,19 +21,20 @@ def generar_estudios(
     maximo: int | None = None,
     tamano_pagina: int = 100,
     pausa: float = 0.3,
+    cliente: ClienteHTTP | None = None,
 ) -> Iterator[dict]:
     """Entrega estudios de uno en uno, siguiendo `nextPageToken` página a página.
 
     maximo: se detiene tras entregar este número de estudios (None = todos).
     pausa:  segundos de espera entre páginas, por cortesía con el servidor.
+    cliente: cliente HTTP a usar (con timeout, reintentos y caché); si no se da, se crea uno.
     """
+    cliente = cliente or ClienteHTTP()
     params = {"query.cond": condicion, "pageSize": tamano_pagina}
     entregados = 0
 
     while True:
-        respuesta = requests.get(URL, params=params, timeout=(5, 30))
-        respuesta.raise_for_status()
-        pagina = respuesta.json()
+        pagina = cliente.get_json(URL, params)  # timeout, reintentos y caché ya van dentro
 
         for estudio in pagina["studies"]:
             if maximo is not None and entregados >= maximo:
