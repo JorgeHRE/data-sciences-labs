@@ -1,0 +1,14 @@
+=== Política de reintentos (sin caché) ===
+GET  /200             -> OK 200         peticiones al servidor=1  (0.0 s)
+GET  /429-luego-200   -> OK 200         peticiones al servidor=2  (1.0 s)
+GET  /503-luego-200   -> OK 200         peticiones al servidor=2  (0.0 s)
+GET  /500-siempre     -> HTTPError 500  peticiones al servidor=4  (0.6 s)
+GET  /400             -> HTTPError 400  peticiones al servidor=1  (0.0 s)
+GET  /401             -> HTTPError 401  peticiones al servidor=1  (0.0 s)
+GET  /404             -> HTTPError 404  peticiones al servidor=1  (0.0 s)
+POST /500-siempre     -> HTTPError 500  peticiones al servidor=1  (0.0 s)
+
+=== Caché: solo se guardan las respuestas 200 ===
+/200 pedida 2 veces: peticiones al servidor=1, 2.ª desde caché=True
+/404 pedida 2 veces: peticiones al servidor=2 (si se hubiera cacheado, serían menos)
+/500-siempre pedida 2 veces: peticiones al servidor=4 (si se hubiera cacheado, serían menos)

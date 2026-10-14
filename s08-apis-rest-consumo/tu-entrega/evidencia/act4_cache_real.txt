@@ -1,0 +1,3 @@
+Corrida 1: 200 estudios en 1.87 s
+Corrida 2: 200 estudios en 0.65 s
+¿Página 1 desde caché?: True

@@ -148,3 +148,55 @@ Con 500 registros, la lista acumuló las 5 páginas de forma simultánea, duplic
 Este patrón de consumo resulta clave al escalar la extracción a los **4,347 estudios de cáncer gástrico** disponibles:
 * **Prevención de desbordamiento:** Mediante una estimación lineal simple ($4\,347 / 500 \approx 8.7$), cargar todos los estudios en una única lista multiplicaría el pico de memoria por un factor cercano a 9 respecto a lo medido aquí, lo que incrementaría la competencia por RAM frente a procesos pesados en paralelo.
 * **Procesamiento en flujo (*streaming*):** El generador permite construir un pipeline donde cada estudio se procesa, filtra (e.g. seleccionando únicamente campos relevantes o criterios específicos) o se persiste en disco conforme llega, permitiendo descartar el resto del JSON de la memoria sin esperar la descarga de todo el catálogo.
+
+## Actividad 4 — El cliente robusto
+
+Código: `clientes/base.py` (clase `ClienteHTTP`). Verificación: `clientes/verificar_politica.py`, con salida en `evidencia/act4_politica.txt` y `evidencia/act4_cache_real.txt`. El generador de la actividad 3 ahora usa este cliente.
+
+### Qué se hizo
+- **`timeout` en todas las peticiones:** lo pone la clase, `(5, 30)` por defecto; quien usa `get()` no puede olvidarlo.
+- **Una `Session` reutilizada:** una `CachedSession` por cliente, así se reaprovecha la conexión.
+- **Reintentos con backoff exponencial:** `urllib3.Retry` montado en un `HTTPAdapter`. Solo `GET`, `HEAD` y `OPTIONS` (idempotentes) y solo para 429, 500, 502, 503 y 504. Máximo 4 reintentos y `backoff_factor=1` (esperas de 0, 2, 4 y 8 s tras los fallos sucesivos).
+- **`Retry-After`:** `respect_retry_after_header=True`.
+- **Caché en disco:** SQLite en `data/cache/` (ignorada por git), expira a las 24 h, y **solo guarda respuestas 200** (`allowable_codes=(200,)`).
+- **Orden de las piezas:** la caché envuelve al adaptador de reintentos. Un acierto de caché no toca la red, y un 429 o 500 intermedio nunca se guarda.
+
+### Política de reintentos
+
+| Código | ¿Reintentar? | Por qué | Observado (servidor local, 3 reintentos) |
+|---|---|---|---|
+| 400 | No | La petición está mal formada; repetirla da el mismo error. | 1 petición |
+| 401 | No | Faltan credenciales o son inválidas; reintentar no las arregla. | 1 petición |
+| 404 | No | El recurso no existe; seguirá sin existir. | 1 petición |
+| 429 | Sí, esperando `Retry-After` | El servidor pide calma y dice cuánto; adelantarse empeora el bloqueo. | 2 peticiones; esperó 1.0 s (el valor de `Retry-After`) |
+| 500 | Sí, con backoff | Fallo transitorio del servidor; puede recuperarse. | 4 peticiones y luego `HTTPError 500` |
+| 503 | Sí, con backoff | Servicio saturado o en mantenimiento; suele ser temporal. | 2 peticiones (503, luego 200) |
+
+Además, un `POST` a una ruta que da 500 hizo **1 sola petición**: los métodos no idempotentes no se reintentan.
+
+### Cómo se verificó
+Las APIs públicas no se pueden forzar a dar 429 o 500 sin abusar de ellas, así que se levantó un servidor falso en `127.0.0.1` que responde lo programado y cuenta las peticiones recibidas. También se comprobó la caché: una respuesta 200 pedida dos veces llegó una sola vez al servidor (la segunda con `from_cache=True`), mientras que las rutas 404 y 500 pedidas dos veces llegaron las dos veces (no se cachean los errores).
+Contra la API real: pedir 200 estudios de ClinicalTrials.gov dos veces tardó 1.87 s y 0.65 s; la segunda salió de la caché.
+
+### Observaciones propias
+
+#### 1. Jerarquía de control: por qué `Retry-After` tiene precedencia sobre el *backoff*
+En la prueba con el error `HTTP 429`, el cliente esperó exactamente el 1.0 s indicado en la cabecera devuelta por el servidor:
+* Con la fórmula interna de `urllib3` y `backoff_factor=1`, el primer reintento habría tenido una espera de 0.0 s. 
+* Respetar `Retry-After` prioriza la instrucción explícita del servidor sobre el cálculo local. Esto evita reintentar inmediatamente a los 0 s (lo que mantendría el bloqueo de tasa) y ajusta la pausa de forma proporcional a la ventana de descongestión declarada por el servicio remoto.
+
+#### 2. El riesgo de cachear respuestas de error transitorio (`HTTP 500`)
+La decisión de restringir la persistencia en disco exclusivamente a respuestas exitosas (`allowable_codes=(200,)`) protege la consistencia del dataset:
+* Un `HTTP 500 Internal Server Error` o `503 Service Unavailable` refleja una falla transitoria del backend en ese momento particular, como se comprobó en la prueba local donde los códigos 404 y 500 llegaron las dos veces al servidor sin ser interceptados por el disco.
+* Si el cliente almacenara errores 500 con la expiración configurada de 24 horas, una caída de pocos segundos quedaría guardada como fallo permanente durante un día completo. Las ejecuciones posteriores no consultarían la API y asumirían de forma errónea que el registro no existe, introduciendo sesgos artificiales en la recolección.
+
+#### 3. Métodos seguros y prevención de efectos secundarios
+La verificación con un método `POST` frente a un error 500 confirmó que el adaptador no reintentó la solicitud (1 sola petición):
+* El estándar HTTP permite reintentar métodos idempotentes (como `PUT` o `DELETE`), pero la política implementada adoptó un criterio más estricto limitándose únicamente a **métodos seguros** (`GET`, `HEAD`, `OPTIONS`).
+* Dado que un método seguro no modifica el estado del recurso, se garantiza que los reintentos automáticos jamás provocarán duplicaciones ni mutaciones imprevistas en el backend si una petición previa sí llegó a procesarse.
+
+#### 4. Evaluación de los reintentos para el pipeline de tesis
+Para una recolección masiva de estudios clínicos o secuencias, configurar 3 reintentos (4 peticiones en total: 1 original + 3 reintentos) con `backoff_factor=1` resulta una decisión equilibrada:
+* **Margen de recuperación transitoria:** Permite sortear reinicios breves de servicios o micro-cortes de conexión sin abortar trabajos por lotes que llevan horas de ejecución.
+* **Tiempo acumulado acotado:** Con `urllib3` (2.8.0), la secuencia de pausas antes de cada reintento corresponde a `[0, 2.0, 4.0, 8.0]` segundos. Si se configuraran 4 reintentos (5 peticiones en total), la espera total sumaría exactamente 14.0 s; con 3 reintentos (4 peticiones), la espera acumulada es de apenas 6.0 s (`0 + 2.0 + 4.0`). Ambos márgenes son lo bastante ágiles como para no demorar el pipeline si un endpoint realmente quedó fuera de servicio.
+* **Transparencia en el diagnóstico:** Con `raise_on_status=False`, el adaptador devuelve la respuesta final para que el cliente genere un `HTTPError` estándar de `requests`. Esto conserva el objeto `response` íntegro y permite registrar en los logs el identificador exacto que falló para un reprocesamiento posterior.
