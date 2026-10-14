@@ -1,0 +1,13 @@
+=== Corrida 1: caché vacía ===
+2026-10-14T20:32:19Z
+clinicaltrials   44 archivos en data/raw/clinicaltrials/  (29 s)
+pubmed           31 archivos en data/raw/pubmed/  (23 s)
+openfda           6 archivos en data/raw/openfda/  (5 s)
+Peticiones reales: 81 | servidas por caché: 0
+
+=== Corrida 2: misma caché ===
+2026-10-14T20:33:17Z
+clinicaltrials   44 archivos en data/raw/clinicaltrials/  (15 s)
+pubmed           31 archivos en data/raw/pubmed/  (12 s)
+openfda           6 archivos en data/raw/openfda/  (2 s)
+Peticiones reales: 0 | servidas por caché: 81

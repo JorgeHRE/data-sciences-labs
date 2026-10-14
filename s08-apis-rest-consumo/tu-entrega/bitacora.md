@@ -425,3 +425,55 @@ Intentar probar el manejo de `HTTP 429` o `500` directamente contra las APIs ofi
 Un conjunto de pruebas que siempre arroja un resultado aprobatorio (100% verde) no demuestra robustez si sus aserciones son triviales o permisivas:
 * **Evaluación de la sensibilidad de los tests:** Al alterar deliberadamente el cliente con cuatro mutaciones estructurales (reintentar sobre un código no recuperable como `404`, persistir respuestas de error en la caché, omitir la obligatoriedad de `timeout` y permitir reintentos en métodos no seguros como `POST`), las pruebas fallaron de inmediato en cada escenario.
 * **Garantía contra regresiones:** Este resultado valida que las aserciones no solo comprueban el "camino feliz", sino que vigilan de manera estricta las fronteras de diseño del cliente HTTP. Si en futuras modificaciones del proyecto se introduce un cambio que vulnere la idempotencia o la política de caché, la suite alertará del fallo antes de que el código llegue a producción o se aplique en pipelines masivos de extracción.
+
+## Actividad 9 — Medir la cortesía
+
+Código: `clientes/base.py` (`AdaptadorContador` y los contadores de `ClienteHTTP`), `clientes/verificar_contador.py`, dos pruebas nuevas en `tests/test_cliente.py`. Evidencia: `evidencia/act9_verificar_contador.txt`, `evidencia/act9_corrida_medida.txt` y `evidencia/act9_peticiones.jsonl`.
+
+### Qué se hizo
+- **Dónde se cuenta:** contar llamadas a `get()` no sirve (incluye aciertos de caché y no ve los reintentos). El contador está en un adaptador que cuelga *debajo* de la caché, así que solo ve lo que sale a la red. `urllib3` deja los reintentos en `respuesta.raw.retries.history`, por lo que `peticiones reales = 1 + reintentos`. Los aciertos de caché se cuentan aparte (`from_cache`).
+- **Registro:** cada evento (`red` o `cache`, con host y momento UTC) se añade a un `.jsonl`; `descargar_crudo` lo escribe en `data/logs/peticiones.jsonl` (no se sube a git; la copia de esta corrida está en `evidencia/`).
+- **Límite conocido:** si la conexión falla con excepción, la historia de reintentos se pierde y se cuenta 1 (es un mínimo). En la corrida medida no hubo ninguna.
+
+### ¿El contador dice la verdad?
+Se comparó con un servidor local que cuenta lo que realmente le llega (`verificar_contador.py`):
+
+| Caso | Servidor recibió | Contador |
+|---|---|---|
+| 200 | 1 | 1 |
+| 429 → 200 | 2 | 2 |
+| 500 persistente (3 reintentos) | 4 | 4 |
+| 404 | 1 | 1 |
+| 5 × el mismo 200 con caché | 1 (+4 de caché) | 1 (+4 de caché) |
+
+Coincide en todos los casos, reintentos incluidos. Las pruebas con `responses` solo cubren la parte de caché, porque `responses` no rellena `raw.retries`.
+
+### Los dos números
+
+**Corrida medida** (descarga completa de las tres fuentes, 2026-10-14, con el cliente ya instrumentado):
+
+| Corrida | Peticiones reales | Servidas por caché | Tiempo |
+|---|---|---|---|
+| 1.ª, caché vacía | **81** (44 ClinicalTrials.gov, 31 NCBI, 6 openFDA) | 0 | 57 s |
+| 2.ª, misma caché | **0** | **81** | 29 s |
+
+Sin reintentos ni errores: las 81 fueron 200 a la primera. La segunda corrida tardó 29 s sin tocar la red solo por las pausas (`sleep`) que el script mete entre peticiones.
+
+**Total del laboratorio, qué consta y qué no:**
+- **Medido:** las 81 peticiones de la corrida 1 y los 81 aciertos de caché de la corrida 2.
+- **Consta, pero no medido con el contador:** la descarga original de la actividad 5 dejó 81 archivos y todos tienen `desde_cache: false`. Eso da al menos 81 peticiones reales; los reintentos de aquella corrida no se registraron.
+- **No medido:** las actividades 1 a 4 (exploración, fallos provocados, comparación de memoria con 500 registros y la política de reintentos) se hicieron antes de existir el contador. Fueron pocas y manuales, pero no hay número. Los fallos de la actividad 4 se hicieron contra un servidor local, no contra las APIs.
+- **Por tanto:** el número total del laboratorio *no se conoce con exactitud*; lo medido es una descarga completa (81) y su repetición desde caché (0 reales).
+
+### Datos para la reflexión
+- Una descarga completa sin caché son 81 peticiones en 57 s, unas **85 por minuto** (≈1.4/s) repartidas en tres servidores distintos; por servidor, ClinicalTrials.gov recibió 44 en 29 s (≈91/min, la pausa de 0.3 s entre peticiones), NCBI 31 en 23 s (≈81/min, ≈1.3/s) y openFDA 6 en 5 s.
+- Límites que se verificaron en este laboratorio: openFDA 240 por minuto y 1 000 al día por IP sin llave; NCBI 3 por segundo sin llave; ClinicalTrials.gov no publica un límite oficial.
+- Las pausas de este script (0.3–0.4 s) son lo que mantiene el ritmo bajo; la caché elimina las repeticiones.
+
+## Observaciones propias
+
+Difícilmente tumbaríamos el servicio de instituciones como el NIH o la NLM, pero con mil ejecuciones simultáneas con la caché vacía el impacto dependería del origen de red:
+
+* **Desde una misma IP pública (e.g. un campus universitario):** Las mil instancias generarían un ritmo agregado de ~91,000 req/min hacia ClinicalTrials.gov y ~81,000 req/min hacia NCBI. No sabemos cómo reaccionaría la infraestructura ante semejante volumen, pero sí sabemos con certeza que supera por órdenes de magnitud el límite oficial de NCBI (3 req/s sin clave) y el umbral no oficial atribuido a ClinicalTrials.gov (~50 req/min). Lo esperable sería recibir errores `HTTP 429 Too Many Requests`; además, dado que nuestro cliente reintenta los 429 con *backoff*, esas mil instancias seguirían sumando peticiones a la red con esperas crecientes en lugar de detenerse de inmediato.
+* **Desde mil IPs independientes:** Cada cliente operaría al ritmo de nuestro script (~1.5 req/s, determinado por la pausa de 0.3 s y la latencia de red). No medimos la capacidad de los balanceadores remotos para saber si esto degradaría sus tiempos de respuesta o si lo absorberían sin problemas, pero la carga agregada sobre sus servidores sería considerable.
+* **El efecto de la caché:** Una vez poblada la caché, el consumo de red cae a **0 peticiones reales** (como mostraron las 81 consultas resueltas en 29 s en la segunda corrida). La caché desacopla el número de ejecuciones del consumo de la API, transformando una carga externa potencialmente problemática en simples lecturas locales de disco.
