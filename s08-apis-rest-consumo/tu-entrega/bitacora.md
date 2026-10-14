@@ -246,3 +246,67 @@ El uso de un "sobre" de metadatos resuelve dos requerimientos analíticos fundam
 ### 3. Límites técnicos observados: la anomalía de OpenFDA y la fidelidad del archivo
 * **Comportamiento no documentado en OpenFDA:** Aunque la documentación oficial lista un tope de `limit=1000`, la API rechaza peticiones anónimas con ese valor devolviendo `HTTP 403 API_KEY_MISSING`, mientras que `limit=999` tiene éxito. Este hallazgo sugiere que la documentación y el comportamiento no coinciden tal como los leímos (quizá por un umbral estricto que exige autenticación al alcanzar el millar), justificando el ajuste pragmático en el código.
 * **Límite honesto de serialización:** Al recibir el JSON, parsearlo a estructura nativa de Python y reescribirlo en disco (`json.dump`), el contenido semántico y los valores son idénticos, y el orden de inserción de las claves se conserva. Sin embargo, el archivo resultante no preserva la igualdad byte a byte respecto a la respuesta original debido a diferencias en espaciado, des-escape de caracteres Unicode (e.g. `\u00e1` a `á`) y formateo numérico (donde `2.50` se serializa como `2.5` o `1e3` como `1000.0`), un detalle relevante a considerar al comparar representaciones de texto en datos científicos.
+
+## Actividad 6 — Validar en la frontera
+
+Código: `clientes/modelos.py` (modelos de Pydantic), `clientes/validar.py` (validación de `data/raw/`) y `clientes/inducidos.py` (fallos provocados). Salidas en `evidencia/act6_validacion.txt`, `act6_inducidos.txt` y `act6_comprobaciones.txt`.
+
+### Qué se hizo
+- Un modelo por fuente (`EstudioCT`, `ReporteFDA`, `ResumenPubMed`) con **solo los campos que usarán las preguntas de la actividad 7**; Pydantic ignora el resto del JSON.
+- Campos imprescindibles obligatorios (identificador, estado, fecha del reporte, `uid`) y el resto opcional, porque los datos reales vienen incompletos.
+- Los registros válidos siguen; los rechazados se **registran** (`data/logs/validacion.log` y `data/rechazados/*.jsonl`, ambos ignorados por git) y se **saltan** sin detener el proceso.
+
+### Reglas aplicadas
+
+| Fuente | Regla | Tipo de regla |
+|---|---|---|
+| ClinicalTrials.gov | `inscritos` ≥ 0 | rango |
+| ClinicalTrials.gov | `estado` dentro de los 14 oficiales | conjunto |
+| ClinicalTrials.gov | fecha de fin no anterior a la de inicio; fechas con solo mes se completan con el día 1 y, al ser la de fin, cuentan como el último día del mes | entre campos |
+| openFDA | edad entre 0 y 120 años, convertida a años según su unidad (el texto `"8"` en décadas es 80 años) | tipo y rango |
+| openFDA | fecha `YYYYMMDD` real y no futura; al menos una reacción | tipo y contenido |
+| PubMed | `uid` numérico; año entre 1800 y el año actual + 1 | tipo y rango |
+
+### Resultados sobre los datos reales
+
+| Fuente | Llegaron | Pasaron | Rechazados |
+|---|---|---|---|
+| ClinicalTrials.gov | 4 347 | 4 347 | 0 |
+| openFDA | 500 | 500 | 0 |
+| PubMed | 500 | 500 | 0 |
+
+**Ningún registro real falló.** Es lo esperable en datos oficiales. Para comprobar que esto no se debe a reglas demasiado laxas, se verificó que lo que pasó quedó bien convertido:
+- La edad de `8` con unidad `800` (décadas) quedó como **80.0 años**; las demás edades van de 24 a 88 años y 116 reportes no traen edad (opcional).
+- ClinicalTrials.gov: 1 419 fechas de inicio y 1 646 de fin vienen solo con mes y fueron aceptadas; 60 estudios no tienen inscritos, 376 no tienen país y 16 no tienen fecha de inicio (todos opcionales, no son errores).
+- PubMed: 495 artículos de 2026 y **5 de 2027**. Son artículos en línea con número impreso del año siguiente, y por eso se acepta hasta el año actual + 1.
+
+### Tres fallos con su motivo (INDUCIDOS, no reales)
+Como no hubo fallos reales, se corrompieron a propósito registros reales, uno por regla. Aquí tres; los 10 casos están en `evidencia/act6_inducidos.txt` y **todos fueron rechazados**.
+
+| Corrupción provocada | Motivo devuelto por Pydantic |
+|---|---|
+| Estudio con `inscritos = -50` | `inscritos: Input should be greater than or equal to 0` |
+| Estudio con fin `2023-01-10` e inicio `2024-07-15` | `Value error, la fecha de fin (2023-01-10) es anterior a la de inicio (2024-07-15)` |
+| Reporte de openFDA con edad de 150 años | `edad_anios: Input should be less than or equal to 120` |
+
+### Límites
+- Los códigos de unidad de edad de openFDA (800 décadas, 801 años, 802 meses...) vienen de su documentación; en nuestros datos solo aparecen 800 y 801, así que las demás conversiones no se han probado con datos reales.
+- Los modelos validan los 500 reportes de openFDA y los 500 resúmenes de PubMed descargados, no todo lo que hay en las bases.
+
+### Observaciones propias
+
+### 1. Datos faltantes vs. datos inválidos: la regla del identificador frente a campos opcionales
+Un registro sin número de participantes inscritos (`enrollmentInfo.count`) se acepta como válido (`None`), pero uno sin identificador principal (`nct_id`, `uid` o `safetyreportid`) se rechaza de inmediato:
+* **El identificador es la clave primaria del registro:** Sin un identificador unívoco no existe trazabilidad, se pierde la capacidad de desduplicar y es imposible contrastar el dato con la fuente original. Un registro sin ID es estructuralmente inservible.
+* **El dato ausente refleja la naturaleza del registro:** Al examinar los 60 estudios que carecen de `enrollmentInfo.count`, se observa que ninguno está en fase activa de reclutamiento. Una parte (8 estudios en estados como `AVAILABLE`, `NO_LONGER_AVAILABLE` o `APPROVED_FOR_MARKETING`) corresponde a registros de acceso expandido o fármacos comercializados donde la noción de reclutamiento clínico no aplica directamente; mientras que la causa en los 39 estudios en estado `COMPLETED` sin este dato queda como una incógnita abierta en el catálogo. Asimismo, conviene distinguir metodológicamente entre la ausencia de información (`None`, 60 casos) y un conteo explícito de cero (`count = 0`, presente en 83 estudios), pues representan estados conceptualmente distintos para la Actividad 7.
+
+### 2. Impacto en los conteos de la Actividad 7 si no se valida en la frontera
+Omitir la validación y transformación previa al análisis downstream generaría tres distorsiones graves:
+* **Fallas en agregaciones cuantitativas:** En openFDA, la edad del paciente llega codificada con claves de unidad (e.g. código `800` para décadas, `801` para años). Si no se normaliza a una escala común en la frontera, un paciente de 8 décadas se sumaría como edad "8" en lugar de "80", alterando promedios y distribuciones demográficas.
+* **Incompatibilidad de tipos:** Si las edades o conteos entran como cadenas de texto (`str`), las operaciones de ordenamiento fallarían lexicográficamente (`"100"` menor que `"20"`), y las funciones estadísticas lanzarían excepciones o producirían agregaciones incorrectas.
+* **Calibración de reglas temporales en PubMed:** Una regla estricta que corte en el año en curso habría rechazado erróneamente los 5 artículos fechados en 2027 (publicaciones electrónicas anticipadas o *ahead of print*); por el contrario, prescindir por completo de una validación temporal habría permitido el ingreso de valores aberrantes (e.g. año 2099). La regla de tolerancia (`año actual + 1`) resolvió ambos problemas.
+
+### 3. Interpretación metodológica del 100% de éxito en datos reales
+Que los 5,347 registros reales descargados hayan superado la validación sin un solo rechazo no implica que las fuentes gocen de una curación exhaustiva:
+* **Cumplimiento de reglas mínimas vs. completitud:** El resultado demuestra únicamente que los datos satisfacen las restricciones obligatorias que definimos, las cuales son deliberadamente permisivas con los campos opcionales. La validación no detecta la omisión de datos: 60 estudios sin inscritos, 376 sin país y 116 reportes de openFDA sin edad pasaron el filtro sin alertar. Esto es crítico para los conteos por país de la Actividad 7, donde esos 376 registros quedarán forzosamente excluidos. Además, tratándose de openFDA, los reportes provienen de farmacovigilancia espontánea, sujetos a alta heterogeneidad de llenado.
+* **El valor de las pruebas con errores inducidos:** La efectividad del esquema no se demostró con los datos reales —cuyos `.jsonl` de rechazos quedaron vacíos—, sino al confrontar los modelos contra los 10 registros corrompidos a propósito en `clientes/inducidos.py`. Como quedó registrado en la salida de `evidencia/act6_inducidos.txt`, cada violación (de rango, pertenencia al conjunto de 14 estados oficiales o ausencia de campos requeridos) disparó el error correspondiente, garantizando que el pipeline cuenta con poder de discriminación ante eventuales actualizaciones de esquemas o valores fuera de norma.
