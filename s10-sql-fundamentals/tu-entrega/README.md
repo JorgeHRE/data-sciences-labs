@@ -78,3 +78,15 @@ Referencias fuera del alcance (tablas no cargadas): `encounters.organization`, `
 ### Diagrama
 
 Ver [`diagrama_er.md`](diagrama_er.md).
+
+## 5. Auditoría y consultas básicas e intermedias (fase 2, actividades 5 y 6.1-6.10)
+
+- `sql/auditoria.sql`: cuatro auditorías, todas limpias en esta carga (0 `Id` duplicados, 0 encuentros anteriores al nacimiento, 0 % de `observations.value` nulo o vacío, 0 encuentros con paciente inexistente).
+- `sql/consultas.sql`: preguntas 6.1 a 6.10, cada una con su comentario clínico y su verificación.
+
+Hallazgos sobre los datos sintéticos que conviene tener presentes:
+
+- `encounters` por año tiene un escalón entre 2016 (12 940) y 2017 (26 892), con meseta de ~27 000 después. Coincide con que Synthea solo exporta con detalle los últimos 10 años; 2026 está incompleto.
+- El top de diagnósticos está dominado por hallazgos y situaciones (`finding`, `situation`), no por enfermedades; "Medication review due" está en el 100 % de los pacientes.
+- La HbA1c (LOINC 4548-4) tiene mediana 4.0 % y el 48.6 % de las mediciones por debajo de 4.0 %, lo cual no es fisiológico; se reporta como limitación del generador.
+- La edad (6.10) se calcula a la fecha de la muerte para fallecidos y a la fecha de corte (último encuentro, 2026-10-26) para vivos. Un corte fijo anterior dejaba edades negativas.
