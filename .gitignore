@@ -13,3 +13,6 @@ __pycache__/
 # Bases de datos locales
 *.duckdb
 *.duckdb.wal
+
+# Configuración local del editor
+.vscode/
