@@ -87,6 +87,7 @@ Ver [`diagrama_er.md`](diagrama_er.md).
 Hallazgos sobre los datos sintéticos que conviene tener presentes:
 
 - `encounters` por año tiene un escalón entre 2016 (12 940) y 2017 (26 892), con meseta de ~27 000 después. No se encontró la causa (hay encuentros desde 1916 y la mezcla de tipos de encuentro es casi igual antes y después); se trata como artefacto del generador. 2026 está incompleto.
+- **Criterio adoptado para la tendencia anual (6.5):** la tendencia se analiza formalmente de 2017 a 2025, que es la ventana principal de estudio. Los años previos solo se presentan en un gráfico complementario con una advertencia explícita del quiebre estructural. 2026 se excluye del análisis de tendencias anuales cerradas o, si se muestra, se marca explícitamente como incompleto; no se anualiza con una regla de tres.
 - El top de diagnósticos está dominado por hallazgos y situaciones (`finding`, `situation`), no por enfermedades; "Medication review due" está en el 100 % de los pacientes.
 - La HbA1c (LOINC 4548-4) tiene mediana 4.0 % y el 48.6 % de las mediciones por debajo de 4.0 %, lo cual no es fisiológico; se reporta como limitación del generador.
 - La edad (6.10) se calcula a la fecha de la muerte para fallecidos y a la fecha de corte (último encuentro, 2026-10-26) para vivos. Un corte fijo anterior dejaba edades negativas.
