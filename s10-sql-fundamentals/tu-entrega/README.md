@@ -86,7 +86,13 @@ Ver [`diagrama_er.md`](diagrama_er.md).
 
 Hallazgos sobre los datos sintéticos que conviene tener presentes:
 
-- `encounters` por año tiene un escalón entre 2016 (12 940) y 2017 (26 892), con meseta de ~27 000 después. Coincide con que Synthea solo exporta con detalle los últimos 10 años; 2026 está incompleto.
+- `encounters` por año tiene un escalón entre 2016 (12 940) y 2017 (26 892), con meseta de ~27 000 después. No se encontró la causa (hay encuentros desde 1916 y la mezcla de tipos de encuentro es casi igual antes y después); se trata como artefacto del generador. 2026 está incompleto.
 - El top de diagnósticos está dominado por hallazgos y situaciones (`finding`, `situation`), no por enfermedades; "Medication review due" está en el 100 % de los pacientes.
 - La HbA1c (LOINC 4548-4) tiene mediana 4.0 % y el 48.6 % de las mediciones por debajo de 4.0 %, lo cual no es fisiológico; se reporta como limitación del generador.
 - La edad (6.10) se calcula a la fecha de la muerte para fallecidos y a la fecha de corte (último encuentro, 2026-10-26) para vivos. Un corte fijo anterior dejaba edades negativas.
+
+## 6. Joins y experimentos (fase 3, actividades 6.11-6.15, 7 y 8)
+
+- `sql/consultas.sql`, 6.11 a 6.15: cohorte de diabetes tipo 2 con hipertensión (309 pacientes), 0 diabéticos sin HbA1c, medicamento más frecuente entre diabéticos (metformina 500 mg ER, por 1 paciente sobre nitroglicerina) y urgencias sin diagnóstico (5 272 de 15 958, 33.04 %).
+- `sql/experimentos.sql`, act. 7: un join por paciente multiplica las filas por 84.6. El costo medio baja de 2 206.65 a 1 648.87 y el total sube 63 veces. Se corrige con `EXISTS`.
+- `sql/experimentos.sql`, act. 8: con el filtro en `WHERE` salen 444 filas y con el filtro en `ON` salen 5 904. El `WHERE` convierte el `LEFT JOIN` en `INNER JOIN`.

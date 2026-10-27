@@ -53,9 +53,11 @@ FROM patients
 WHERE birthdate < DATE '1960-01-01';
 
 -- 6.5 ¿Cuántos encuentros hay por año?
--- Salto brusco entre 2016 (12 940) y 2017 (26 892), y meseta de ~27 000 hasta 2025:
--- coherente con que Synthea solo exporta con detalle los últimos 10 años; no es un
--- cambio clínico real. 2026 está incompleto (corte en octubre), no es comparable.
+-- Salto brusco entre 2016 (12 940) y 2017 (26 892), y meseta de ~27 000 hasta 2025.
+-- No se encontró la causa: hay encuentros desde 1916 y la mezcla de encounterclass es
+-- casi igual antes y después de 2017, así que no se explica por pérdida de historia ni
+-- de tipos de encuentro. Es un artefacto del generador, no un cambio clínico real.
+-- 2026 está incompleto (corte en octubre), no es comparable.
 -- Control: la suma de los años es 429 640, igual al total de encounters.
 SELECT
     YEAR(start) AS anio,
@@ -208,3 +210,116 @@ SELECT
 FROM etiquetado
 GROUP BY grupo_etario, estado_vital
 ORDER BY MIN(edad), estado_vital;
+
+-- ===================== AVANZADAS =====================
+
+-- 6.11 ¿Cuántos pacientes tienen diabetes tipo 2 Y hipertensión?
+-- Cada diagnóstico es una fila distinta en conditions, así que se agrupa por paciente y
+-- se exige tener los dos códigos: SNOMED 44054006 (diabetes tipo 2) y 59621000
+-- (hipertensión esencial). HAVING COUNT(DISTINCT code) = 2 significa "tiene ambos".
+-- Resultado: 309 pacientes (69.59 % de los diabéticos; la hipertensión en toda la cohorte
+-- es 36.3 %, casi la mitad), lo que apunta a una fuerte asociación entre ambas.
+-- Verificación: INTERSECT de las dos listas de pacientes da también 309, y los diabéticos
+-- SIN hipertensión (NOT EXISTS sobre conditions) son 135: 309 + 135 = 444 diabéticos.
+WITH pacientes_ambos AS (
+    SELECT patient
+    FROM conditions
+    WHERE code IN ('44054006', '59621000')
+    GROUP BY patient
+    HAVING COUNT(DISTINCT code) = 2
+)
+SELECT
+    COUNT(*) AS pacientes_con_ambas_condiciones,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(DISTINCT patient) FROM conditions WHERE code = '44054006'), 2) AS pct_sobre_diabeticos,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM patients), 2) AS pct_sobre_poblacion_total
+FROM pacientes_ambos;
+
+-- 6.12 ¿Cuántos pacientes con diabetes tipo 2 no tienen ninguna medición de HbA1c?
+-- Anti-join con NOT EXISTS: diabéticos (SNOMED 44054006) sin ninguna fila en observations
+-- con LOINC 4548-4. Resultado: 0; los 444 diabéticos tienen al menos una HbA1c.
+-- Verificación: con EXISTS (el complemento) salen 444, y 0 + 444 = 444.
+-- En datos reales esta misma consulta suele revelar una brecha de cuidado (diabéticos sin
+-- seguimiento); en esta cohorte sintética no hay ninguna.
+SELECT COUNT(DISTINCT c.patient) AS diabeticos_sin_hba1c
+FROM conditions c
+WHERE c.code = '44054006'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM observations o
+      WHERE o.patient = c.patient
+        AND o.code = '4548-4'
+  );
+
+-- 6.13 Para cada paciente: su primer y su último encuentro.
+-- Una fila por paciente (5 904), con MIN/MAX de start y el seguimiento entre ambos. Como
+-- el resultado completo no se lee, se muestran los 10 con mayor seguimiento.
+-- Seguimiento medio por paciente: 11 998 días (32.85 años), mediana 11 544; los encuentros
+-- se registran desde el nacimiento, no solo los últimos años. 9 pacientes tienen todos
+-- sus encuentros el mismo día (seguimiento 0).
+-- Control: hay 5 904 filas y la suma de n_encuentros es 429 640, igual que encounters.
+SELECT
+    patient,
+    MIN(start) AS primer_encuentro,
+    MAX(start) AS ultimo_encuentro,
+    COUNT(*) AS n_encuentros,
+    DATEDIFF('day', MIN(start), MAX(start)) AS dias_seguimiento,
+    ROUND(DATEDIFF('day', MIN(start), MAX(start)) / 365.25, 2) AS anios_seguimiento
+FROM encounters
+GROUP BY patient
+ORDER BY dias_seguimiento DESC
+LIMIT 10;
+
+-- 6.14 ¿Cuál es el medicamento más frecuente entre los pacientes con diabetes tipo 2?
+-- Cohorte: SNOMED 44054006 (444 pacientes). La CTE usa SELECT DISTINCT patient para que el
+-- JOIN con medications no multiplique filas, y se cuentan pacientes distintos (no recetas).
+-- Resultado: metformina 500 mg ER (231 pacientes, 52.03 %), pero solo por 1 paciente sobre
+-- nitroglicerina (230). Cuatro de los cinco primeros no tratan la diabetes (nitroglicerina,
+-- metoprolol, paracetamol, simvastatina): son comunes en toda la cohorte o por comorbilidad.
+-- "Más frecuente entre diabéticos" no es "propio de los diabéticos"; para eso habría que
+-- comparar contra el % en el resto de la cohorte.
+-- Control: los 444 diabéticos tienen al menos un medicamento (0 sin medicación).
+WITH cohort_diabeticos AS (
+    SELECT DISTINCT patient
+    FROM conditions
+    WHERE code = '44054006'
+)
+SELECT
+    m.code,
+    ANY_VALUE(m.description) AS medicamento,
+    COUNT(DISTINCT m.patient) AS n_pacientes,
+    ROUND(100.0 * COUNT(DISTINCT m.patient) / (SELECT COUNT(*) FROM cohort_diabeticos), 2) AS pct_penetracion
+FROM medications m
+JOIN cohort_diabeticos d
+  ON m.patient = d.patient
+GROUP BY m.code
+ORDER BY n_pacientes DESC
+LIMIT 5;
+
+-- 6.15 ¿Cuántos encuentros de urgencias no tienen ningún diagnóstico registrado, y a
+-- cuántos pacientes afectan?
+-- Anti-join con NOT EXISTS sobre conditions.encounter. Se usa encounterclass = 'emergency'
+-- (no se incluye 'urgentcare': es atención urgente no hospitalaria) y cualquier fila de
+-- conditions cuenta como diagnóstico, incluidos los (finding) y (situation): son registros
+-- clínicos del encuentro, y filtrarlos exigiría un criterio por tipo que no está en la tabla.
+-- Resultado: 5 272 de 15 958 encuentros de urgencias (33.04 %), 1 873 pacientes.
+-- Control: 10 686 con diagnóstico + 5 272 sin diagnóstico = 15 958.
+-- Ojo: conditions.encounter es el encuentro donde SE DIAGNOSTICÓ la condición, así que
+-- "sin diagnóstico" significa "sin condición nueva registrada en ese encuentro", no que el
+-- paciente carezca de diagnósticos. En toda la cohorte, 85.5 % de los ambulatorios
+-- tampoco tiene diagnóstico asociado.
+WITH urgencias_sin_diagnostico AS (
+    SELECT
+        e.Id AS encounter_id,
+        e.patient
+    FROM encounters e
+    WHERE e.encounterclass = 'emergency'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM conditions c
+          WHERE c.encounter = e.Id
+      )
+)
+SELECT
+    COUNT(*) AS encuentros_urgencias_sin_diagnostico,
+    COUNT(DISTINCT patient) AS pacientes_afectados
+FROM urgencias_sin_diagnostico;
