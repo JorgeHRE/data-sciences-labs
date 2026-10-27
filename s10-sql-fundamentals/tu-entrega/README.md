@@ -1,4 +1,4 @@
-# Lab 10 — SQL fundamentals (fase 1: datos, carga y esquema)
+# Lab 10 — SQL fundamentals
 
 ## 1. Generación de datos (actividad 1)
 
@@ -97,3 +97,33 @@ Hallazgos sobre los datos sintéticos que conviene tener presentes:
 - `sql/consultas.sql`, 6.11 a 6.15: cohorte de diabetes tipo 2 con hipertensión (309 pacientes), 0 diabéticos sin HbA1c, medicamento más frecuente entre diabéticos (metformina 500 mg ER, por 1 paciente sobre nitroglicerina) y urgencias sin diagnóstico (5 272 de 15 958, 33.04 %).
 - `sql/experimentos.sql`, act. 7: un join por paciente multiplica las filas por 84.6. El costo medio baja de 2 206.65 a 1 648.87 y el total sube 63 veces. Se corrige con `EXISTS`.
 - `sql/experimentos.sql`, act. 8: con el filtro en `WHERE` salen 444 filas y con el filtro en `ON` salen 5 904. El `WHERE` convierte el `LEFT JOIN` en `INNER JOIN`.
+
+## 7. Rendimiento y comparación con pandas (fase 4, actividades 9 y 10)
+
+Todo se ejecuta también en el notebook [`lab10_auditoria_rendimiento_pandas.ipynb`](lab10_auditoria_rendimiento_pandas.ipynb), que reúne la auditoría, las mediciones y la comparación.
+
+### Actividad 9: rendimiento de 6.15 (`sql/rendimiento.sql`)
+
+Se reemplazó el `NOT EXISTS` correlacionado por `LEFT JOIN ... WHERE c.encounter IS NULL`. Ambas versiones devuelven 5 272 encuentros y 1 873 pacientes.
+
+| | A: `NOT EXISTS` | B: `LEFT JOIN ... IS NULL` |
+|---|---|---|
+| Mediana (31 corridas) | 14.8 ms | 6.9 ms |
+| Pico de memoria (RSS) | 92 MB (+26 sobre la base de 66) | 85 MB (+19) |
+| Join en el plan | `MARK` + filtro | `RIGHT_ANTI` |
+
+La predicción de que B usaría más memoria resultó falsa. Reordenar filtros o reducir columnas no habría cambiado nada: DuckDB ya lee solo las columnas necesarias y aplica el filtro dentro del escaneo, algo que se explica por su almacenamiento columnar. La causa de la mejora (el vector marcador de `MARK`) es una lectura del plan, no un experimento aislado.
+
+### Actividad 10: SQL contra pandas (`pandas_comparacion.py`)
+
+Consultas 6.2, 6.6 y 6.15, con las tablas ya cargadas a DataFrames (la carga, ~80 ms, se reporta aparte):
+
+| Consulta | DuckDB | pandas | Líneas SQL / pandas |
+|---|---|---|---|
+| 6.2 (distribución por sexo) | 0.99 ms | 0.79 ms | 7 / 8 |
+| 6.6 (encuentros por paciente) | 3.01 ms | 24.78 ms | 15 / 15 |
+| 6.15 (anti-join) | 13.87 ms | 83.54 ms | 16 / 11 |
+
+Las razones entre motores varían entre corridas; se leen como órdenes de magnitud (~6x a ~9x en 6.6 y 6.15).
+
+**Conclusión:** para este volumen se elige DuckDB: fue superior o igual en las tres consultas (hasta 8.2x más rápido en 6.6) y no carga las tablas en memoria como pandas (98 MB solo en 3 columnas de `encounters`). Se pasaría a pandas únicamente en la última milla, si el resultado agregado (<10 mil filas) debe integrarse con scikit-learn o seaborn; y se reconsideraría el uso exclusivo de pandas si el dataset nunca superara los 100 mil registros y los tiempos se mantuvieran por debajo de 50 ms.
