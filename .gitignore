@@ -9,3 +9,7 @@ __pycache__/
 
 # Secretos locales (nunca al repositorio)
 .env
+
+# Bases de datos locales
+*.duckdb
+*.duckdb.wal
