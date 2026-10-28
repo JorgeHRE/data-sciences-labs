@@ -75,3 +75,20 @@ correr una consulta suelta: `duckdb.connect(ruta, read_only=True)`.
 - Los desempates de la actividad 7 (`encounter`, `value`) son reproducibles pero no clínicos.
 - Los tiempos de la actividad 10 son de DuckDB local (16 hilos) con la base en disco; no se extrapolan a otros
   motores. Entre corridas varían unos milisegundos y la razón ventana/self-join entre 8.6 y 9.2.
+
+## Revisión de los criterios de evaluación
+
+| Criterio | Estado | Dónde / excepciones |
+|----------|--------|---------------------|
+| Consultas con CTEs de nombre descriptivo | Cumple, con excepciones declaradas | Las consultas originales del lab 10 (actividad 1) se conservan anidadas a propósito, para compararlas con su reescritura. Las comparaciones `EXCEPT` entre dos CTEs se escriben en línea. Los alias de una letra (`a`, `b`) solo son alias de tabla en joins, no CTEs. |
+| Cada consulta con su pregunta clínica | Cumple | Cabecera de cada actividad más comentario en cada consulta de apoyo (control, contraste, resumen). |
+| Readmisión con criterios explícitos | Cumple | Actividad 5: ventana de 30 días con el día 30 incluido, todas las readmisiones, mismo día cuenta, solapes y fallecidos excluidos. |
+| Episodios bien construidos y tres gaps | Cumple | Actividad 6: fin acumulado máximo; gaps 30, 60 y 90; control independiente con `NOT EXISTS`. |
+| Frame de cada ventana declarado | Cumple | Toda función con `ORDER BY` lleva `ROWS` o `RANGE` explícito, incluidos `FIRST_VALUE` (actividad 3) y el acumulado de la actividad 8 (`RANGE ... CURRENT ROW`, el mismo que el por defecto, ahora declarado). `LAG`, `LEAD` y `ROW_NUMBER` no usan frame; `COUNT(*) OVER (PARTITION BY ...)` sin `ORDER BY` abarca toda la partición. |
+| Por qué `rn = 1` va fuera de la CTE | Cumple | Actividad 7: el orden lógico FROM → WHERE → ventanas → SELECT. |
+| Política sobre valores posteriores | Cumple | Actividad 9: política A (sin posteriores), B como contraste, y la limitación del día 0. |
+| Ventana contra self-join con planes y tiempos | Cumple | Actividad 10: tabla de tiempos en el `.sql`; planes reales y corridas en el notebook. |
+
+Los ajustes de la revisión final (frames declarados, subconsultas convertidas en CTEs, nombres descriptivos)
+no cambian ningún resultado: las 36 sentencias del `.sql` devuelven las mismas filas, con el mismo contenido,
+antes y después, y el notebook sigue pasando sus `assert`.
