@@ -1163,3 +1163,144 @@ SELECT COUNT(*) AS filas_comparadas,                                       -- 12
        COUNT(*) FILTER (WHERE ABS(w.acum_w - m.acum_m) > 1e-9
                            OR ABS(w.movil_w - m.movil_m) > 1e-9) AS filas_con_diferencia  -- 0
 FROM ventanas w JOIN manual m USING (pos);
+
+
+-- =============================================================================
+-- Actividad 9: Valor de laboratorio más cercano a la fecha índice (±90 días)
+-- Índice: primer diagnóstico de 'Diabetes mellitus type 2 (disorder)' (444 pac.)
+-- Analito: HbA1c (code 4548-4, laboratorio, numérico)
+-- =============================================================================
+-- DECISIONES DECLARADAS (confirmadas con el usuario):
+--  (1) Índice = MIN(start) del diagnóstico DM2 por paciente; analito = HbA1c.
+--  (2) POLÍTICA SOBRE VALORES POSTERIORES (decisión obligatoria): NO se permiten.
+--      Política A (principal): solo valores previos o del día 0, -90 <= días <= 0.
+--      Un valor medido DESPUÉS del índice ya refleja el diagnóstico y el
+--      tratamiento: usarlo como covariable basal es fuga de información (sesión 3,
+--      punto 7 del checklist). Costo declarado: 36 pacientes (139 - 103) que solo
+--      tienen HbA1c posterior quedan sin valor. Política B (+-90 días, con
+--      posteriores) se calcula solo como CONTRASTE para medir cuánto cambiaría.
+--  (3) "Más cercano" = menor ABS(días). Empate de distancia (uno antes y otro
+--      después): gana el anterior. Mismo día: date DESC, encounter DESC,
+--      value DESC (determinista, no clínico).
+--  (4) El día 0 cuenta como "previo". LIMITACIÓN: no se puede saber el orden
+--      dentro del mismo día; la HbA1c del día 0 probablemente es el examen que
+--      dispara el diagnóstico. Con la versión estricta (días < 0) saldrían 0
+--      pacientes: ninguno tiene HbA1c estrictamente anterior en +-90 días.
+-- -----------------------------------------------------------------------------
+-- RESULTADOS MEDIDOS: de 444 pacientes con índice, la política A da valor a 103
+-- (todos con la HbA1c del día 0) y deja 341 con NULL. La política B da valor a
+-- 139: añade 36 pacientes cuyo único valor cercano es POSTERIOR al índice; a los
+-- 103 de A les asigna el mismo valor (0 cambios), porque el día 0 es siempre el
+-- más cercano. Es decir, B no mejora la medición basal: solo agrega 36 valores
+-- con fuga. Control sin ventanas: 103 elegidos, 0 duplicados, 0 fuera de ventana.
+-- =============================================================================
+
+-- Política A (principal): un renglón por paciente con índice (444); NULL si no
+-- hay HbA1c previa o del día 0 en los 90 días anteriores.
+WITH indice AS (
+    SELECT patient, MIN(start) AS fecha_indice
+    FROM conditions
+    WHERE description = 'Diabetes mellitus type 2 (disorder)'
+    GROUP BY patient
+),
+hba1c AS (
+    SELECT patient, encounter, date, CAST(date AS DATE) AS fecha,
+           CAST(value AS DOUBLE) AS valor
+    FROM observations
+    WHERE code = '4548-4' AND category = 'laboratory' AND type = 'numeric'
+),
+candidatos AS (
+    SELECT i.patient, i.fecha_indice, h.encounter, h.date, h.fecha, h.valor,
+           date_diff('day', i.fecha_indice, h.fecha) AS dias   -- <0 antes, >0 después
+    FROM indice i
+    JOIN hba1c h USING (patient)
+),
+elegidos AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY patient
+               ORDER BY ABS(dias),                -- (3) el más cercano
+                        CASE WHEN dias > 0 THEN 1 ELSE 0 END,  -- empate: el anterior
+                        date DESC, encounter DESC, valor DESC
+           ) AS rn
+    FROM candidatos
+    WHERE dias BETWEEN -90 AND 0                  -- (2) política A: sin posteriores
+)
+SELECT
+    i.patient,
+    i.fecha_indice,
+    e.fecha  AS fecha_hba1c,
+    e.dias   AS dias_desde_indice,
+    e.valor  AS hba1c_basal
+FROM indice i
+LEFT JOIN elegidos e ON e.patient = i.patient AND e.rn = 1
+ORDER BY i.patient;
+
+-- Resumen A frente a B (contraste) y cuántos pacientes cambian de valor
+WITH indice AS (
+    SELECT patient, MIN(start) AS fecha_indice
+    FROM conditions
+    WHERE description = 'Diabetes mellitus type 2 (disorder)'
+    GROUP BY patient
+),
+candidatos AS (
+    SELECT i.patient, h.encounter, h.date, CAST(h.value AS DOUBLE) AS valor,
+           date_diff('day', i.fecha_indice, CAST(h.date AS DATE)) AS dias
+    FROM indice i
+    JOIN observations h ON h.patient = i.patient
+    WHERE h.code = '4548-4' AND h.category = 'laboratory' AND h.type = 'numeric'
+),
+ranking AS (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY patient
+                              ORDER BY ABS(dias), CASE WHEN dias > 0 THEN 1 ELSE 0 END,
+                                       date DESC, encounter DESC, valor DESC) AS rn_b,
+           -- Política A: la misma ordenación pero SOLO entre los no posteriores
+           ROW_NUMBER() OVER (PARTITION BY patient, (dias <= 0)
+                              ORDER BY ABS(dias), date DESC, encounter DESC, valor DESC) AS rn_a
+    FROM candidatos
+    WHERE ABS(dias) <= 90
+),
+a AS (SELECT patient, valor, dias FROM ranking WHERE dias <= 0 AND rn_a = 1),
+b AS (SELECT patient, valor, dias FROM ranking WHERE rn_b = 1)
+SELECT
+    (SELECT COUNT(*) FROM indice)                                   AS pacientes_indice,     -- 444
+    (SELECT COUNT(*) FROM a)                                        AS con_valor_politica_A, -- 103
+    (SELECT COUNT(*) FROM b)                                        AS con_valor_politica_B, -- 139
+    (SELECT COUNT(*) FROM b WHERE dias > 0)                         AS B_elige_posterior,
+    (SELECT COUNT(*) FROM a JOIN b USING (patient) WHERE a.valor <> b.valor) AS cambian_de_valor_A_vs_B,
+    (SELECT COUNT(*) FROM a WHERE dias = 0)                         AS A_en_dia_0;
+
+-- Control independiente de la política A (sin ventanas): ningún valor elegido
+-- queda fuera de [-90, 0] y no existe otra medición más cercana ni igual de cercana
+-- y más reciente. Se espera 0 violaciones.
+WITH indice AS (
+    SELECT patient, MIN(start) AS fecha_indice
+    FROM conditions
+    WHERE description = 'Diabetes mellitus type 2 (disorder)'
+    GROUP BY patient
+),
+cand AS (
+    SELECT i.patient, h.date, h.encounter, CAST(h.value AS DOUBLE) AS valor,
+           date_diff('day', i.fecha_indice, CAST(h.date AS DATE)) AS dias
+    FROM indice i
+    JOIN observations h ON h.patient = i.patient
+    WHERE h.code = '4548-4' AND h.category = 'laboratory' AND h.type = 'numeric'
+      AND date_diff('day', i.fecha_indice, CAST(h.date AS DATE)) BETWEEN -90 AND 0
+),
+elegidos AS (
+    -- Elegido = no existe otra candidata del paciente más cercana, o igual de
+    -- cercana pero más tardía dentro del día (mismo orden que el principal)
+    SELECT c.* FROM cand c
+    WHERE NOT EXISTS (
+        SELECT 1 FROM cand o
+        WHERE o.patient = c.patient
+          AND (ABS(o.dias), -epoch(o.date), o.encounter, o.valor)
+              < (ABS(c.dias), -epoch(c.date), c.encounter, c.valor)
+    )
+)
+SELECT
+    COUNT(*)                                       AS filas_elegidas,                 -- 103
+    COUNT(*) - COUNT(DISTINCT patient)             AS pacientes_con_mas_de_una,       -- 0
+    COUNT(*) FILTER (WHERE dias > 0 OR dias < -90) AS fuera_de_ventana_o_posteriores  -- 0
+FROM elegidos;
