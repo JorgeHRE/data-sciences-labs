@@ -280,3 +280,56 @@ SELECT
     (i.n_intersect - r.n_reescrita) AS discrepancia
 FROM conteo_intersect i
 CROSS JOIN conteo_reescrita r;
+
+-- =============================================================================
+-- TABLA DE PREDICCIONES AJUSTADA POR BLOQUE (PRUEBA B - CONSULTA 6.11)
+-- =============================================================================
+-- Bloque / CTE         | Predicción COUNT(*) | Predicción DISTINCT | Justificación y relación con actividad 1
+-- ---------------------+---------------------+---------------------+---------------------------------------------------------------------
+-- diabeticos_lista     | 444 filas           | 444 pacientes       | 309 / 0.6959 = 444. Synthea emite 1 fila por debut crónico (COUNT* = DISTINCT).
+-- hipertensos_lista    | ~1,200–1,400 filas  | ~1,200–1,400 pac.   | Representa el 20–24% de los 5,904 pacientes (esperable >> 5.23% comórbido).
+-- cohorte_intersect    | 309 filas           | 309 pacientes       | Referencia fija de la Act. 1; INTERSECT deduplica implícitamente.
+-- conteo_intersect     | 1 fila              | N/A (escalar)       | COUNT(*) colapsa la cohorte algebraica al valor escalar 309.
+-- pacientes_con_ambas  | 309 filas           | 309 pacientes       | Agrupamiento por paciente con HAVING COUNT(DISTINCT code) = 2.
+-- conteo_reescritura   | 1 fila              | N/A (escalar)       | COUNT(*) colapsa la lista agrupada al valor escalar 309.
+-- consulta_final       | 1 fila (3 cols)     | N/A                 | CROSS JOIN 1x1; la predicción central es discrepancia = 0 (consistencia).
+-- =============================================================================
+
+
+
+-- =============================================================================
+-- TABLA DE RESULTADOS EMPÍRICOS VS. PREDICCIONES (PRUEBA B - CONSULTA 6.11)
+-- =============================================================================
+-- Bloque / CTE         | Predicción COUNT(*) | COUNT(*) Real | DISTINCT Real | ¿Coincide? | Diagnóstico / Observaciones
+-- ---------------------+---------------------+---------------+---------------+------------+--------------------------------------------------------------
+-- diabeticos_lista     | 444 filas           | 444           | 444           | Sí         | Hipótesis confirmada: 1 fila por debut crónico en conditions.
+-- hipertensos_lista    | ~1,200–1,400 filas  | 2,145         | 2,145         | No         | Subestimación de prevalencia acumulada (36.33% vs 20–24%).
+-- cohorte_intersect    | 309 filas           | 309           | 309           | Sí         | Álgebra de conjuntos idéntica a agregación previa.
+-- conteo_intersect     | 1 fila              | 1             | N/A           | Sí         | Escalar puro derivado del INTERSECT (309).
+-- pacientes_con_ambas  | 309 filas           | 309           | 309           | Sí         | HAVING COUNT(DISTINCT code) = 2 aísla exactamente 309.
+-- conteo_reescritura   | 1 fila              | 1             | N/A           | Sí         | Escalar puro derivado del agrupamiento (309).
+-- consulta_final       | 1 fila (discrep. 0) | 1 fila        | N/A           | Sí         | Discrepancia = 0 (309 algebraico vs 309 agrupado).
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- NOTA METODOLÓGICA: ¿POR QUÉ FALLÓ LA PREDICCIÓN DE HIPERTENSOS?
+-- -----------------------------------------------------------------------------
+-- 1. Prevalencia puntual vs. Prevalencia acumulada de por vida (Lifetime prevalence):
+--    La intuición teórica del 20–24% correspondía a la prevalencia puntual de una
+--    encuesta comunitaria transversal. Sin embargo, la tabla `conditions` de Synthea
+--    almacena el registro longitudinal de toda la trayectoria de vida de los pacientes.
+--    Al avanzar la edad en la simulación, probablemente la hipertensión es una condición con alta
+--    incidencia acumulada.
+--
+-- 2. Sesgo de cohorte clínica:
+--    El dataset no representa un censo abierto y sano, sino individuos registrados
+--    en un sistema de salud con encuentros clínicos activos, lo que incrementa la
+--    densidad diagnóstica frente a una muestra poblacional general.
+--
+-- 3. Aprendizaje analítico:
+--    - Se validó empíricamente que en Synthea no hay duplicidad de registros crónicos
+--      para el mismo paciente (COUNT(*) = COUNT(DISTINCT) = 2,145), por lo que la
+--      ausencia de DISTINCT en la CTE no introduce inflación de filas.
+--    - En estudios de Real-World Data (RWD), extrapolar tasas epidemiológicas
+--      transversales a tablas longitudinales de eventos crónicos subestima el volumen
+--      de pacientes si no se acota el horizonte temporal con un filtro de fecha.
