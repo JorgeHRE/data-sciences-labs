@@ -1039,3 +1039,127 @@ FROM (
     GROUP BY p.patient, p.code
     HAVING COUNT(*) > 1
 );
+
+
+-- =============================================================================
+-- Actividad 8: Acumulado vs. media móvil de 3 mediciones (frames)
+-- Analito: HbA1c (code 4548-4, laboratorio, valor numérico)
+-- Pregunta analítica: ¿cómo difiere la media acumulada (frame por defecto) de
+--                     la media móvil de 3 mediciones (ROWS declarado)?
+-- =============================================================================
+-- DECISIONES DECLARADAS (confirmadas con el usuario):
+--  (1) Analito: HbA1c, filtrado por code = '4548-4' (media móvil con lectura
+--      clínica de tendencia del control glucémico).
+--  (2) Orden dentro del paciente: ORDER BY date, encounter (determinista).
+--      El frame por defecto de una ventana con ORDER BY es
+--      RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW: las filas con el
+--      MISMO valor de ORDER BY son "pares" y se agregan juntas. Por eso se
+--      muestra una tercera columna con el acumulado en ROWS, para ver si el
+--      frame por defecto cambia algo en el paciente elegido.
+--  (3) Acumulado = AVG(valor) con el frame por defecto. Media móvil =
+--      AVG(valor) con ROWS BETWEEN 2 PRECEDING AND CURRENT ROW. En las dos
+--      primeras mediciones la ventana tiene menos de 3 filas: se CONSERVAN y
+--      se marca con n_en_ventana (1, 2, 3, 3, ...).
+--  (4) Paciente: el primer id (orden alfabético) con exactamente 12 mediciones
+--      numéricas de HbA1c, sin fechas empatadas y con al menos 4 valores
+--      distintos. Regla escrita en el SQL, no elegido a mano. Ajuste sobre la
+--      regla acordada: sin el requisito de valores distintos salía el paciente
+--      0301e7fa-..., cuyas 12 mediciones valen todas 7.0 y las tres columnas
+--      eran idénticas (no demuestra nada). Hay 140 pacientes de 12 mediciones
+--      sin empates con valores no constantes.
+-- Por qué difieren: el acumulado pesa TODAS las mediciones previas por igual, así
+-- que reacciona cada vez más lento (la medición n pesa 1/n). La media móvil solo
+-- recuerda las últimas 3 y sigue la tendencia reciente.
+-- -----------------------------------------------------------------------------
+-- RESULTADOS MEDIDOS (paciente 05e42e38-..., 12 mediciones, 2017-2026): acumulada
+-- y acumulada con ROWS son idénticas en las 12 filas (no hay fechas empatadas).
+-- Difieren de la móvil desde la 4a medición: al caer a 5.8 (2024-03-08) la móvil
+-- baja a 6.000 y la acumulada solo a 6.178; en la última, móvil 6.133 y
+-- acumulada 6.167. Control sin frames: 12 filas comparadas, 0 diferencias.
+-- =============================================================================
+
+WITH hba1c AS (
+    SELECT
+        patient,
+        encounter,
+        date,
+        CAST(value AS DOUBLE) AS valor
+    FROM observations
+    WHERE code = '4548-4'
+      AND category = 'laboratory'
+      AND type = 'numeric'
+),
+paciente_elegido AS (
+    -- Regla determinista (decisión 4)
+    SELECT patient
+    FROM hba1c
+    GROUP BY patient
+    HAVING COUNT(*) = 12
+       AND COUNT(*) = COUNT(DISTINCT date)      -- sin fechas empatadas
+       AND COUNT(DISTINCT valor) >= 4           -- valores que varían
+    ORDER BY patient
+    LIMIT 1
+)
+SELECT
+    h.patient,
+    h.date,
+    h.valor,
+    -- Acumulado: frame por defecto (RANGE ... UNBOUNDED PRECEDING AND CURRENT ROW)
+    ROUND(AVG(h.valor) OVER (
+        PARTITION BY h.patient ORDER BY h.date, h.encounter
+    ), 3) AS media_acumulada,
+    -- Mismo acumulado pero con ROWS: fila por fila, sin agrupar pares
+    ROUND(AVG(h.valor) OVER (
+        PARTITION BY h.patient ORDER BY h.date, h.encounter
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ), 3) AS media_acumulada_rows,
+    -- Media móvil de 3 mediciones: frame declarado
+    ROUND(AVG(h.valor) OVER (
+        PARTITION BY h.patient ORDER BY h.date, h.encounter
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+    ), 3) AS media_movil_3,
+    -- Cuántas filas entran realmente en la ventana móvil (parcial al inicio)
+    COUNT(*) OVER (
+        PARTITION BY h.patient ORDER BY h.date, h.encounter
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+    ) AS n_en_ventana
+FROM hba1c h
+JOIN paciente_elegido USING (patient)
+ORDER BY h.date, h.encounter;
+
+-- Control independiente (sin frames): para el paciente elegido, la media
+-- acumulada y la móvil de cada medición se recalculan con un self-join sobre el
+-- orden (date, encounter) y deben coincidir con la consulta de ventanas.
+-- Se espera 0 filas con diferencia.
+WITH hba1c AS (
+    SELECT patient, encounter, date, CAST(value AS DOUBLE) AS valor,
+           ROW_NUMBER() OVER (PARTITION BY patient ORDER BY date, encounter) AS pos
+    FROM observations
+    WHERE code = '4548-4' AND category = 'laboratory' AND type = 'numeric'
+),
+paciente_elegido AS (
+    SELECT patient FROM hba1c
+    GROUP BY patient
+    HAVING COUNT(*) = 12 AND COUNT(*) = COUNT(DISTINCT date) AND COUNT(DISTINCT valor) >= 4
+    ORDER BY patient LIMIT 1
+),
+ventanas AS (
+    SELECT h.pos,
+           AVG(h.valor) OVER (PARTITION BY h.patient ORDER BY h.pos) AS acum_w,
+           AVG(h.valor) OVER (PARTITION BY h.patient ORDER BY h.pos
+                              ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS movil_w
+    FROM hba1c h JOIN paciente_elegido USING (patient)
+),
+manual AS (
+    SELECT a.pos,
+           AVG(b.valor) FILTER (WHERE b.pos <= a.pos)                       AS acum_m,
+           AVG(b.valor) FILTER (WHERE b.pos BETWEEN a.pos - 2 AND a.pos)    AS movil_m
+    FROM hba1c a
+    JOIN paciente_elegido USING (patient)
+    JOIN hba1c b ON b.patient = a.patient
+    GROUP BY a.patient, a.pos
+)
+SELECT COUNT(*) AS filas_comparadas,                                       -- 12
+       COUNT(*) FILTER (WHERE ABS(w.acum_w - m.acum_m) > 1e-9
+                           OR ABS(w.movil_w - m.movil_m) > 1e-9) AS filas_con_diferencia  -- 0
+FROM ventanas w JOIN manual m USING (pos);
