@@ -1304,3 +1304,136 @@ SELECT
     COUNT(*) - COUNT(DISTINCT patient)             AS pacientes_con_mas_de_una,       -- 0
     COUNT(*) FILTER (WHERE dias > 0 OR dias < -90) AS fuera_de_ventana_o_posteriores  -- 0
 FROM elegidos;
+
+
+-- =============================================================================
+-- Actividad 10: Rendimiento, ventana contra self-join (días entre visitas)
+-- Misma pregunta que la actividad 4: días desde la visita anterior, por paciente.
+-- =============================================================================
+-- DECISIONES DECLARADAS (confirmadas con el usuario):
+--  (1) Self-join (opción A): cada visita se une con TODAS las anteriores del
+--      mismo paciente, (b.start, b.id) < (a.start, a.id), y se toma MAX(b.start).
+--      Sin funciones de ventana. Reproduce el desempate (start, id) de la
+--      actividad 4, así que el resultado debe ser idéntico. Descartadas: el
+--      anti-join con NOT EXISTS (más difícil de leer y más caro) y unir
+--      ROW_NUMBER con pos - 1 (usa una función de ventana).
+--  (2) Medición: EXPLAIN ANALYZE con 1 corrida de calentamiento descartada y 5
+--      corridas medidas; se reporta mediana y rango. DuckDB local, 16 hilos, base
+--      ya en disco. Los tiempos no se extrapolan a otros motores.
+--  (3) Extra: escalamiento con los 50 pacientes de más visitas.
+-- Cada consulta de abajo lleva una etiqueta [Q:...] para localizarla.
+-- -----------------------------------------------------------------------------
+-- RESULTADOS MEDIDOS (EXPLAIN ANALYZE, 1 calentamiento + 5 corridas, mediana y rango)
+--
+-- | Criterio          | Ventana (LAG)                        | Self-join                                   |
+-- |-------------------|--------------------------------------|---------------------------------------------|
+-- | Resultado         | 429,640 filas, 5,904 NULL, mediana 12 | idéntico; EXCEPT en ambos sentidos: 0 filas |
+-- | Tiempo, 429,640   | 0.027 s (0.024-0.031)                | 0.231 s (0.221-0.239): ~8.6 veces más       |
+-- | Tiempo, top 50    | 0.0072 s (0.0067-0.0078)             | 0.0622 s (0.057-0.069): ~8.6 veces más      |
+-- | Plan              | Scan -> Window (ordena y particiona) | CTE materializada -> Hash Join LEFT ->      |
+-- |                   | -> agregado. Sin producto de filas.  | Hash Group By -> agregado                   |
+-- | Filas intermedias | 429,640 en todo el plan              | 54,827,506 salidas del join (54,821,602     |
+-- |                   |                                      | pares previos + 5,904 primeras visitas)     |
+-- | Legibilidad       | 1 expresión: LAG(...) OVER (...)     | join con desigualdad de tupla + MAX +       |
+-- |                   |                                      | GROUP BY; hay que razonar qué es "previa"   |
+--
+-- Escalamiento: los 50 pacientes con más visitas (634-990 visitas cada uno)
+-- son 34,817 visitas (8 % de las filas) pero 12,210,619 pares (22 % de los
+-- pares del total, 54,821,602). El self-join pasó de 0.062 s a 0.231 s (3.7
+-- veces) cuando los pares se multiplicaron por 4.5: su costo sigue a los pares
+-- (suma de n^2 por paciente), no a las filas. La ventana pasó de 0.007 s a
+-- 0.027 s (3.7 veces) al multiplicar las filas por 12.3.
+--
+-- Nota sobre los tiempos del plan: los milisegundos por operador son tiempo de
+-- CPU sumado entre los 16 hilos (el Hash Join marca 1.69 s y el Hash Group By
+-- 1.66 s, pero el total real es 0.24 s). El tiempo comparable es el Total Time.
+--
+-- CONCLUSIÓN: ambas versiones dan el mismo resultado. En este conjunto las dos
+-- son instantáneas (menos de 0.25 s), así que el rendimiento no decide por sí
+-- solo; la ventana es ~8.6 veces más rápida, más corta y más fácil de leer. El
+-- self-join materializa 54.8 millones de pares y su costo crece con el cuadrado
+-- de las visitas por paciente: con pacientes de miles de visitas o tablas más
+-- grandes, la diferencia se amplía. Es la razón por la que "días desde la visita
+-- anterior" se escribe con LAG. Límite: es un solo motor (DuckDB, 16 hilos) y
+-- una sola base; no se extrapola a otros motores ni a otras formas de los datos.
+-- -----------------------------------------------------------------------------
+-- =============================================================================
+
+-- [Q:ventana] Resumen con LAG (versión de la actividad 4)
+WITH visitas AS (
+    SELECT CAST(start AS DATE) AS fecha,
+           LAG(CAST(start AS DATE)) OVER (PARTITION BY patient ORDER BY start, id) AS fecha_previa
+    FROM encounters
+)
+SELECT COUNT(*)                                    AS filas,
+       COUNT(*) FILTER (WHERE fecha_previa IS NULL) AS nulos,
+       MEDIAN(date_diff('day', fecha_previa, fecha)) AS mediana_dias
+FROM visitas;
+
+-- [Q:selfjoin] Resumen con self-join, sin funciones de ventana
+WITH v AS (
+    SELECT patient, id, start, CAST(start AS DATE) AS fecha FROM encounters
+),
+anterior AS (
+    SELECT a.id, a.fecha, MAX(b.start) AS start_previa
+    FROM v a
+    LEFT JOIN v b
+           ON b.patient = a.patient
+          AND (b.start, b.id) < (a.start, a.id)       -- todas las visitas previas
+    GROUP BY a.id, a.fecha                             -- la más reciente = MAX
+)
+SELECT COUNT(*)                                     AS filas,
+       COUNT(*) FILTER (WHERE start_previa IS NULL)  AS nulos,
+       MEDIAN(date_diff('day', CAST(start_previa AS DATE), fecha)) AS mediana_dias
+FROM anterior;
+
+-- [Q:equivalencia] Mismo resultado por visita: EXCEPT en ambas direcciones
+-- (se espera 0 filas en cada sentido, sobre las 429,640 visitas)
+WITH ventana AS (
+    SELECT id, date_diff('day',
+               LAG(CAST(start AS DATE)) OVER (PARTITION BY patient ORDER BY start, id),
+               CAST(start AS DATE)) AS dias
+    FROM encounters
+),
+selfjoin AS (
+    SELECT a.id, date_diff('day', CAST(MAX(b.start) AS DATE), CAST(a.start AS DATE)) AS dias
+    FROM encounters a
+    LEFT JOIN encounters b
+           ON b.patient = a.patient AND (b.start, b.id) < (a.start, a.id)
+    GROUP BY a.id, a.start
+)
+SELECT
+    (SELECT COUNT(*) FROM ventana)                                          AS filas_ventana,
+    (SELECT COUNT(*) FROM selfjoin)                                         AS filas_selfjoin,
+    (SELECT COUNT(*) FROM (SELECT * FROM ventana  EXCEPT SELECT * FROM selfjoin)) AS solo_ventana,
+    (SELECT COUNT(*) FROM (SELECT * FROM selfjoin EXCEPT SELECT * FROM ventana))  AS solo_selfjoin;
+
+-- [Q:escala_ventana] Escalamiento: solo los 50 pacientes con más visitas (ventana)
+WITH top50 AS (
+    SELECT patient FROM encounters GROUP BY patient ORDER BY COUNT(*) DESC, patient LIMIT 50
+),
+visitas AS (
+    SELECT CAST(e.start AS DATE) AS fecha,
+           LAG(CAST(e.start AS DATE)) OVER (PARTITION BY e.patient ORDER BY e.start, e.id) AS fecha_previa
+    FROM encounters e JOIN top50 USING (patient)
+)
+SELECT COUNT(*) AS filas, MEDIAN(date_diff('day', fecha_previa, fecha)) AS mediana_dias
+FROM visitas;
+
+-- [Q:escala_selfjoin] Escalamiento: los mismos 50 pacientes (self-join)
+WITH top50 AS (
+    SELECT patient FROM encounters GROUP BY patient ORDER BY COUNT(*) DESC, patient LIMIT 50
+),
+v AS (
+    SELECT e.patient, e.id, e.start, CAST(e.start AS DATE) AS fecha
+    FROM encounters e JOIN top50 USING (patient)
+),
+anterior AS (
+    SELECT a.id, a.fecha, MAX(b.start) AS start_previa
+    FROM v a
+    LEFT JOIN v b ON b.patient = a.patient AND (b.start, b.id) < (a.start, a.id)
+    GROUP BY a.id, a.fecha
+)
+SELECT COUNT(*) AS filas,
+       MEDIAN(date_diff('day', CAST(start_previa AS DATE), fecha)) AS mediana_dias
+FROM anterior;
