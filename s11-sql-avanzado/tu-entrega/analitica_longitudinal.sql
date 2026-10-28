@@ -333,3 +333,206 @@ CROSS JOIN conteo_reescrita r;
 --    - En estudios de Real-World Data (RWD), extrapolar tasas epidemiológicas
 --      transversales a tablas longitudinales de eventos crónicos subestima el volumen
 --      de pacientes si no se acota el horizonte temporal con un filtro de fecha.
+
+
+-- =============================================================================
+-- Actividad 3: Trayectoria de encuentros (GROUP BY vs. Funciones de Ventana)
+-- Pregunta analítica: Por paciente, calcular fecha índice (primera visita),
+--                     fin de seguimiento (última visita) y volumen de contactos.
+-- =============================================================================
+
+-- =============================================================================
+-- TABLA DE PREDICCIONES (ACTIVIDAD 3 - CAMINO 1: GROUP BY)
+-- =============================================================================
+-- Métrica / Pregunta          | Predicción                  | Justificación analítica
+-- ----------------------------+-----------------------------+------------------------------------------------------------------
+-- 1. Filas devueltas          | 5,904 filas                 | 1 fila por paciente único con al menos un encuentro registrado.
+-- 2. Columnas proyectadas     | 4 columnas                  | patient, primera_visita, ultima_visita, total_visitas.
+-- 3. Volumen de visitas       | Mín: 1, Mediana: ~39,       | Validado en Act. 6.6: la media fue 72.8 y el máximo 990 visitas, mediana validada igual.
+--                             | Máx: 990                    | 
+-- 4. Rango temporal global    | Mín: ~1915–1940             | min(primera_visita) corresponde al encuentro más antiguo de la
+--    [min(primera_visita) a   | Máx: Década de 2020         | base (nacimiento/infancia de los pacientes más longevos).
+--     max(ultima_visita)]     | (~2020–2025+)               | max(ultima_visita) refleja el contacto más reciente registrado
+--                             |                             | en la simulación antes de que cese la generación de eventos.
+-- 5. Ventana sin deduplicar   | 429,640 filas               | 1 fila por cada registro original de la tabla encounters.
+--    Ventana deduplicada (rn=1)| 5,904 filas                | Colapsa al mismo grano de pacientes únicos que el GROUP BY.
+-- =============================================================================
+
+
+-- -----------------------------------------------------------------------------
+-- CAMINO 1: Agregación con GROUP BY (Colapso relacional estricto)
+-- -----------------------------------------------------------------------------
+SELECT 
+    e.patient,
+    MIN(e.start) AS primera_visita,
+    MAX(e.start) AS ultima_visita,
+    COUNT(*)     AS total_visitas
+FROM encounters e
+GROUP BY e.patient;
+
+-- -----------------------------------------------------------------------------
+-- CAMINO 2: Funciones de Ventana (Colapso relacional con ventana)
+-- -----------------------------------------------------------------------------
+WITH visitas_calculadas AS (
+    SELECT 
+        patient,
+        start,
+        FIRST_VALUE(start) OVER (
+            PARTITION BY patient 
+            ORDER BY start
+        ) AS primera_visita,
+        LAST_VALUE(start) OVER (
+            PARTITION BY patient 
+            ORDER BY start 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) AS ultima_visita,
+        COUNT(*) OVER (
+            PARTITION BY patient
+        ) AS total_visitas,
+        ROW_NUMBER() OVER (
+            PARTITION BY patient 
+            ORDER BY start
+        ) AS rn
+    FROM encounters
+)
+SELECT 
+    patient,
+    primera_visita,
+    ultima_visita,
+    total_visitas
+FROM visitas_calculadas
+WHERE rn = 1;
+
+-- -----------------------------------------------------------------------------
+-- VALIDACIÓN DE EQUIVALENCIA FORMAL (Bidirectional EXCEPT)
+-- -----------------------------------------------------------------------------
+-- Se prueba que no existen registros en el resultado del GROUP BY que no estén
+-- en el resultado de la ventana, ni registros en el resultado de la ventana que no estén en el resultado del GROUP BY.
+-- Se esperan 0 filas de discrepancia, lo que confirma la equivalencia formal de ambos enfoques.
+-- debido a que ambos producen exactamente 5,904 filas (1 por paciente único con al menos un encuentro).
+
+WITH camino1_groupby AS (
+    SELECT 
+        patient,
+        MIN(start) AS primera_visita,
+        MAX(start) AS ultima_visita,
+        COUNT(*)   AS total_visitas
+    FROM encounters
+    GROUP BY patient
+),
+ventana_base AS (
+    SELECT 
+        patient,
+        FIRST_VALUE(start) OVER (
+            PARTITION BY patient 
+            ORDER BY start
+        ) AS primera_visita,
+        LAST_VALUE(start) OVER (
+            PARTITION BY patient 
+            ORDER BY start 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) AS ultima_visita,
+        COUNT(*) OVER (
+            PARTITION BY patient
+        ) AS total_visitas,
+        ROW_NUMBER() OVER (
+            PARTITION BY patient 
+            ORDER BY start
+        ) AS rn
+    FROM encounters
+),
+camino2_ventanas AS (
+    SELECT 
+        patient,
+        primera_visita,
+        ultima_visita,
+        total_visitas
+    FROM ventana_base
+    WHERE rn = 1
+)
+SELECT *, 'En GROUP BY pero ausente en Ventanas' AS discrepancia 
+FROM (
+    SELECT * FROM camino1_groupby 
+    EXCEPT 
+    SELECT * FROM camino2_ventanas
+)
+UNION ALL
+SELECT *, 'En Ventanas pero ausente en GROUP BY' AS discrepancia 
+FROM (
+    SELECT * FROM camino2_ventanas 
+    EXCEPT 
+    SELECT * FROM camino1_groupby
+);
+
+
+-- -----------------------------------------------------------------------------
+-- Control de independencia de tamaño y conservación de cardinalidad (Auditoría empírica)
+-- -----------------------------------------------------------------------------
+-- Se verifica que ambos caminos devuelvan el mismo número de pacientes únicos y el mismo número total de visitas, confirmando la equivalencia empírica.
+-- La predicción es que ambos caminos deben devolver 5,904 filas (pacientes únicos) y 429,640 visitas totales.
+-- Se prefiere el camino 1 (GROUP BY) por su menor complejidad, aunque ambos caminos son equivalentes formalmente.
+WITH camino1_groupby AS (
+    SELECT 
+        patient,
+        MIN(start) AS primera_visita,
+        MAX(start) AS ultima_visita,
+        COUNT(*)   AS total_visitas
+    FROM encounters
+    GROUP BY patient
+),
+ventana_base AS (
+    SELECT 
+        patient,
+        FIRST_VALUE(start) OVER (PARTITION BY patient ORDER BY start) AS primera_visita,
+        LAST_VALUE(start) OVER (
+            PARTITION BY patient ORDER BY start 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) AS ultima_visita,
+        COUNT(*) OVER (PARTITION BY patient) AS total_visitas,
+        ROW_NUMBER() OVER (PARTITION BY patient ORDER BY start) AS rn
+    FROM encounters
+),
+camino2_ventanas AS (
+    SELECT patient, primera_visita, ultima_visita, total_visitas
+    FROM ventana_base
+    WHERE rn = 1
+),
+control_independiente AS (
+    SELECT 
+        -- Verificación 1: Cardinalidad de filas (pacientes únicos)
+        (SELECT COUNT(*) FROM patients)                  AS censo_pacientes_base,
+        (SELECT COUNT(DISTINCT patient) FROM encounters) AS pacientes_con_visitas_base,
+        (SELECT COUNT(*) FROM camino1_groupby)           AS filas_camino1,
+        (SELECT COUNT(*) FROM camino2_ventanas)          AS filas_camino2,
+
+        -- Verificación 2: Conservación de eventos (filas crudas de encuentros)
+        (SELECT COUNT(*) FROM encounters)                AS encuentros_totales_base,
+        (SELECT SUM(total_visitas) FROM camino1_groupby)  AS suma_visitas_camino1,
+        (SELECT SUM(total_visitas) FROM camino2_ventanas) AS suma_visitas_camino2
+)
+SELECT 
+    -- Auditoría de pacientes
+    censo_pacientes_base,
+    pacientes_con_visitas_base,
+    filas_camino1,
+    filas_camino2,
+    (filas_camino1 - censo_pacientes_base) AS delta_pacientes_c1,
+    (filas_camino2 - censo_pacientes_base) AS delta_pacientes_c2,
+
+    -- Auditoría de eventos
+    encuentros_totales_base,
+    suma_visitas_camino1,
+    suma_visitas_camino2,
+    (suma_visitas_camino1 - encuentros_totales_base) AS delta_eventos_c1,
+    (suma_visitas_camino2 - encuentros_totales_base) AS delta_eventos_c2,
+
+    -- Veredicto global
+    CASE 
+        WHEN filas_camino1 = censo_pacientes_base 
+         AND filas_camino2 = censo_pacientes_base
+         AND suma_visitas_camino1 = encuentros_totales_base
+         AND suma_visitas_camino2 = encuentros_totales_base
+        THEN 'CORRECTO (Cardinalidad y eventos conservados)'
+        ELSE 'REVISAR DISCREPANCIA'
+    END AS estado_validacion
+FROM control_independiente;
