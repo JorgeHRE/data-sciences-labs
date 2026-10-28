@@ -536,3 +536,80 @@ SELECT
         ELSE 'REVISAR DISCREPANCIA'
     END AS estado_validacion
 FROM control_independiente;
+
+-- =============================================================================
+-- Actividad 4: Días entre visitas consecutivas (LAG)
+-- Pregunta analítica: por paciente, ¿cuántos días pasan entre una visita y la
+--                     anterior? ¿Cuál es la mediana?
+-- =============================================================================
+-- DECISIONES DECLARADAS (confirmadas con el usuario):
+--  (1) Visitas simultáneas: SE CONSERVAN (opción A). Hay 1,928 pares
+--      (paciente, start) idénticos a nivel timestamp; a nivel de fecha son más
+--      (ver ceros abajo). Son contactos reales, así que dan 0 días. El orden
+--      usa (start, id) para que el LAG sea determinista entre empates.
+--  (2) Unidad: días enteros sobre CAST(start AS DATE), con date_diff('day').
+--      Restar TIMESTAMP daría fracciones de día; aquí se lee "días calendario".
+--  (3) NULL de la primera visita: se dejan como NULL (no existe visita previa)
+--      y se excluyen explícitamente del cálculo de la mediana.
+-- -----------------------------------------------------------------------------
+-- RESULTADOS MEDIDOS (opción A): 429,640 filas (una por encuentro, no se pierde
+-- ninguna), 5,904 NULL (uno por paciente), 17,820 ceros, mínimo 0, máximo
+-- 15,372 días, media 167.2 y MEDIANA = 12 días.
+-- Contraste (opción B, un día por paciente): 411,820 filas, mediana = 14 días.
+-- =============================================================================
+
+-- Detalle: días desde la visita anterior, por paciente
+WITH visitas AS (
+    SELECT
+        patient,
+        id,
+        CAST(start AS DATE) AS fecha,
+        -- LAG mira la fila anterior DENTRO de cada paciente (PARTITION BY),
+        -- ordenada cronológicamente; el id desempata visitas del mismo instante.
+        LAG(CAST(start AS DATE)) OVER (
+            PARTITION BY patient ORDER BY start, id
+        ) AS fecha_previa
+    FROM encounters
+)
+SELECT
+    patient,
+    id,
+    fecha,
+    fecha_previa,                                      -- NULL en la 1a visita
+    date_diff('day', fecha_previa, fecha) AS dias_desde_previa
+FROM visitas
+ORDER BY patient, fecha, id;
+
+-- Resumen: mediana y control de NULL / ceros
+WITH visitas AS (
+    SELECT
+        CAST(start AS DATE) AS fecha,
+        LAG(CAST(start AS DATE)) OVER (
+            PARTITION BY patient ORDER BY start, id
+        ) AS fecha_previa
+    FROM encounters
+),
+intervalos AS (
+    SELECT date_diff('day', fecha_previa, fecha) AS dias FROM visitas
+)
+SELECT
+    COUNT(*)                                    AS filas,            -- esperado 429,640
+    COUNT(*) FILTER (WHERE dias IS NULL)        AS nulos_primera,    -- esperado 5,904
+    COUNT(*) FILTER (WHERE dias = 0)            AS ceros,            -- 17,820
+    MEDIAN(dias) FILTER (WHERE dias IS NOT NULL) AS mediana_dias,    -- 12
+    AVG(dias)                                   AS media_dias,       -- 167.2 (sesgada por colas largas)
+    MAX(dias)                                   AS maximo_dias       -- 15,372
+FROM intervalos;
+
+-- Contraste (opción B): un día por paciente, sin visitas simultáneas
+WITH dias_con_visita AS (
+    SELECT DISTINCT patient, CAST(start AS DATE) AS fecha FROM encounters
+),
+intervalos AS (
+    SELECT date_diff('day',
+               LAG(fecha) OVER (PARTITION BY patient ORDER BY fecha),
+               fecha) AS dias
+    FROM dias_con_visita
+)
+SELECT COUNT(*) AS filas, MEDIAN(dias) AS mediana_dias_B               -- 411,820 / 14
+FROM intervalos;
