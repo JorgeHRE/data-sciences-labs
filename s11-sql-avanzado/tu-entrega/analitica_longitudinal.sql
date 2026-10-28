@@ -100,15 +100,26 @@ SELECT * FROM diferencias_b_menos_a;
 -- Dado que ambos conjuntos son vacíos (0 filas), el EXCEPT devuelve 0 filas
 -- de forma trivial. Este control verifica contra las tablas base que el cero
 -- responde a cobertura total (444 diabéticos con HbA1c) y no a un error de filtro.
+WITH diabeticos_con_hba1c AS (
+    SELECT DISTINCT c.patient
+    FROM conditions c
+    JOIN observations o 
+      ON c.patient = o.patient
+    WHERE c.code = '44054006'
+      AND o.code = '4548-4'
+),
+censo_diabeticos AS (
+    SELECT COUNT(DISTINCT patient) AS total_diabeticos
+    FROM conditions
+    WHERE code = '44054006'
+)
 SELECT 
-    (SELECT COUNT(DISTINCT patient) FROM conditions WHERE code = '44054006') AS total_diabeticos,
-    COUNT(DISTINCT c.patient) AS diabeticos_con_hba1c,
-    (SELECT COUNT(DISTINCT patient) FROM conditions WHERE code = '44054006') - COUNT(DISTINCT c.patient) AS residuo_sin_hba1c
-FROM conditions c
-JOIN observations o 
-  ON c.patient = o.patient
-WHERE c.code = '44054006'
-  AND o.code = '4548-4';
+    cd.total_diabeticos,
+    COUNT(*)                         AS diabeticos_con_hba1c,
+    cd.total_diabeticos - COUNT(*)   AS residuo_sin_hba1c
+FROM diabeticos_con_hba1c
+CROSS JOIN censo_diabeticos cd
+GROUP BY cd.total_diabeticos;
 
 -- =============================================================================
 -- Actividad 1 (Continuación): Consulta 6.11 - Comorbilidad DM2 e Hipertensión
@@ -362,13 +373,16 @@ CROSS JOIN conteo_reescrita r;
 -- -----------------------------------------------------------------------------
 -- CAMINO 1: Agregación con GROUP BY (Colapso relacional estricto)
 -- -----------------------------------------------------------------------------
-SELECT 
-    e.patient,
-    MIN(e.start) AS primera_visita,
-    MAX(e.start) AS ultima_visita,
-    COUNT(*)     AS total_visitas
-FROM encounters e
-GROUP BY e.patient;
+WITH resumen_por_paciente AS (
+    SELECT 
+        e.patient,
+        MIN(e.start) AS primera_visita,
+        MAX(e.start) AS ultima_visita,
+        COUNT(*)     AS total_visitas
+    FROM encounters e
+    GROUP BY e.patient
+)
+SELECT * FROM resumen_por_paciente;
 
 -- -----------------------------------------------------------------------------
 -- CAMINO 2: Funciones de Ventana (Colapso relacional con ventana)
@@ -380,6 +394,7 @@ WITH visitas_calculadas AS (
         FIRST_VALUE(start) OVER (
             PARTITION BY patient 
             ORDER BY start
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
         ) AS primera_visita,
         LAST_VALUE(start) OVER (
             PARTITION BY patient 
@@ -426,6 +441,7 @@ ventana_base AS (
         FIRST_VALUE(start) OVER (
             PARTITION BY patient 
             ORDER BY start
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
         ) AS primera_visita,
         LAST_VALUE(start) OVER (
             PARTITION BY patient 
@@ -483,7 +499,10 @@ WITH camino1_groupby AS (
 ventana_base AS (
     SELECT 
         patient,
-        FIRST_VALUE(start) OVER (PARTITION BY patient ORDER BY start) AS primera_visita,
+        FIRST_VALUE(start) OVER (
+            PARTITION BY patient ORDER BY start 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) AS primera_visita,
         LAST_VALUE(start) OVER (
             PARTITION BY patient ORDER BY start 
             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
@@ -896,16 +915,16 @@ ORDER BY cubeta;
 -- coincidir con contar, SIN ventanas, las recetas para las que NO existe otra
 -- receta previa del mismo paciente cuyo fin quede a <= 30 días de su inicio
 -- (o después de él).
-WITH r AS (
+WITH recetas_numeradas AS (
     SELECT row_number() OVER () AS rid, patient, CAST(start AS DATE) AS ini,
            CAST(stop AS DATE) AS fin
     FROM medications
     WHERE description = '1 ML Epoetin Alfa 4000 UNT/ML Injection [Epogen]'
 )
 SELECT COUNT(*) AS episodios_control                                  -- debe = 785
-FROM r a
+FROM recetas_numeradas a
 WHERE NOT EXISTS (
-    SELECT 1 FROM r b
+    SELECT 1 FROM recetas_numeradas b
     WHERE b.patient = a.patient
       AND (b.ini, b.fin, b.rid) < (a.ini, a.fin, a.rid)
       AND date_diff('day', b.fin, a.ini) <= 30
@@ -944,10 +963,13 @@ WHERE NOT EXISTS (
 -- =============================================================================
 
 -- Conteos antes y después (sin deduplicar frente a un renglón por par)
-SELECT
-    COUNT(*)                                       AS filas_antes,         -- 5,719,327
-    COUNT(DISTINCT (patient, code))                AS pares_paciente_analito  -- 384,983 = filas_despues
-FROM observations;
+WITH totales AS (
+    SELECT
+        COUNT(*)                        AS filas_antes,              -- 5,719,327
+        COUNT(DISTINCT (patient, code)) AS pares_paciente_analito    -- 384,983 = filas_despues
+    FROM observations
+)
+SELECT * FROM totales;
 
 -- Camino principal: CTE con ROW_NUMBER y filtro externo
 WITH ordenadas AS (
@@ -970,16 +992,17 @@ WHERE rn = 1;
 
 -- Contraste con QUALIFY (DuckDB filtra por la ventana sin CTE) y verificación
 -- de equivalencia con EXCEPT en ambas direcciones (deben dar 0 filas).
-WITH principal AS (
+WITH numeradas AS (
+    SELECT o.*, ROW_NUMBER() OVER (
+        PARTITION BY patient, code
+        ORDER BY date DESC,
+                 CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL THEN 0 ELSE 1 END,
+                 encounter DESC, value DESC) AS rn
+    FROM observations o
+),
+principal AS (
     SELECT date, patient, encounter, code, value
-    FROM (
-        SELECT o.*, ROW_NUMBER() OVER (
-            PARTITION BY patient, code
-            ORDER BY date DESC,
-                     CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL THEN 0 ELSE 1 END,
-                     encounter DESC, value DESC) AS rn
-        FROM observations o
-    )
+    FROM numeradas
     WHERE rn = 1
 ),
 con_qualify AS (
@@ -999,16 +1022,17 @@ SELECT
 
 -- Control independiente (sin ventanas): un renglón por par y la fecha elegida
 -- es la máxima del par. Se espera 0 pares duplicados y 0 fechas distintas del máximo.
-WITH elegidas AS (
+WITH numeradas AS (
+    SELECT patient, code, date, ROW_NUMBER() OVER (
+        PARTITION BY patient, code
+        ORDER BY date DESC,
+                 CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL THEN 0 ELSE 1 END,
+                 encounter DESC, value DESC) AS rn
+    FROM observations
+),
+elegidas AS (
     SELECT patient, code, date
-    FROM (
-        SELECT patient, code, date, ROW_NUMBER() OVER (
-            PARTITION BY patient, code
-            ORDER BY date DESC,
-                     CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL THEN 0 ELSE 1 END,
-                     encounter DESC, value DESC) AS rn
-        FROM observations
-    )
+    FROM numeradas
     WHERE rn = 1
 ),
 maximos AS (
@@ -1027,18 +1051,19 @@ JOIN maximos m USING (patient, code);
 -- y no todas coinciden en valor (aquí el criterio 2b/2c decide qué se conserva).
 WITH por_par AS (
     SELECT patient, code, MAX(date) AS fecha_max FROM observations GROUP BY patient, code
-)
-SELECT
-    COUNT(*)                                          AS pares_con_empate_en_ultima_fecha,
-    COUNT(*) FILTER (WHERE valores_distintos > 1)     AS de_ellos_con_valores_distintos
-FROM (
+),
+empates_en_ultima_fecha AS (
     SELECT p.patient, p.code, COUNT(*) AS filas, COUNT(DISTINCT o.value) AS valores_distintos
     FROM por_par p
     JOIN observations o
       ON o.patient = p.patient AND o.code = p.code AND o.date = p.fecha_max
     GROUP BY p.patient, p.code
     HAVING COUNT(*) > 1
-);
+)
+SELECT
+    COUNT(*)                                          AS pares_con_empate_en_ultima_fecha,
+    COUNT(*) FILTER (WHERE valores_distintos > 1)     AS de_ellos_con_valores_distintos
+FROM empates_en_ultima_fecha;
 
 
 -- =============================================================================
@@ -1104,9 +1129,10 @@ SELECT
     h.patient,
     h.date,
     h.valor,
-    -- Acumulado: frame por defecto (RANGE ... UNBOUNDED PRECEDING AND CURRENT ROW)
+    -- Acumulado: frame por defecto, aquí DECLARADO explícitamente (RANGE agrupa pares)
     ROUND(AVG(h.valor) OVER (
         PARTITION BY h.patient ORDER BY h.date, h.encounter
+        RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
     ), 3) AS media_acumulada,
     -- Mismo acumulado pero con ROWS: fila por fila, sin agrupar pares
     ROUND(AVG(h.valor) OVER (
@@ -1145,7 +1171,8 @@ paciente_elegido AS (
 ),
 ventanas AS (
     SELECT h.pos,
-           AVG(h.valor) OVER (PARTITION BY h.patient ORDER BY h.pos) AS acum_w,
+           AVG(h.valor) OVER (PARTITION BY h.patient ORDER BY h.pos
+                              RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS acum_w,
            AVG(h.valor) OVER (PARTITION BY h.patient ORDER BY h.pos
                               ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS movil_w
     FROM hba1c h JOIN paciente_elegido USING (patient)
@@ -1261,15 +1288,15 @@ ranking AS (
     FROM candidatos
     WHERE ABS(dias) <= 90
 ),
-a AS (SELECT patient, valor, dias FROM ranking WHERE dias <= 0 AND rn_a = 1),
-b AS (SELECT patient, valor, dias FROM ranking WHERE rn_b = 1)
+valor_politica_a AS (SELECT patient, valor, dias FROM ranking WHERE dias <= 0 AND rn_a = 1),
+valor_politica_b AS (SELECT patient, valor, dias FROM ranking WHERE rn_b = 1)
 SELECT
     (SELECT COUNT(*) FROM indice)                                   AS pacientes_indice,     -- 444
-    (SELECT COUNT(*) FROM a)                                        AS con_valor_politica_A, -- 103
-    (SELECT COUNT(*) FROM b)                                        AS con_valor_politica_B, -- 139
-    (SELECT COUNT(*) FROM b WHERE dias > 0)                         AS B_elige_posterior,
-    (SELECT COUNT(*) FROM a JOIN b USING (patient) WHERE a.valor <> b.valor) AS cambian_de_valor_A_vs_B,
-    (SELECT COUNT(*) FROM a WHERE dias = 0)                         AS A_en_dia_0;
+    (SELECT COUNT(*) FROM valor_politica_a)                                        AS con_valor_politica_A, -- 103
+    (SELECT COUNT(*) FROM valor_politica_b)                                        AS con_valor_politica_B, -- 139
+    (SELECT COUNT(*) FROM valor_politica_b WHERE dias > 0)                         AS B_elige_posterior,
+    (SELECT COUNT(*) FROM valor_politica_a a JOIN valor_politica_b b USING (patient) WHERE a.valor <> b.valor) AS cambian_de_valor_A_vs_B,
+    (SELECT COUNT(*) FROM valor_politica_a WHERE dias = 0)                         AS A_en_dia_0;
 
 -- Control independiente de la política A (sin ventanas): ningún valor elegido
 -- queda fuera de [-90, 0] y no existe otra medición más cercana ni igual de cercana
@@ -1280,7 +1307,7 @@ WITH indice AS (
     WHERE description = 'Diabetes mellitus type 2 (disorder)'
     GROUP BY patient
 ),
-cand AS (
+candidatas_previas AS (
     SELECT i.patient, h.date, h.encounter, CAST(h.value AS DOUBLE) AS valor,
            date_diff('day', i.fecha_indice, CAST(h.date AS DATE)) AS dias
     FROM indice i
@@ -1291,9 +1318,9 @@ cand AS (
 elegidos AS (
     -- Elegido = no existe otra candidata del paciente más cercana, o igual de
     -- cercana pero más tardía dentro del día (mismo orden que el principal)
-    SELECT c.* FROM cand c
+    SELECT c.* FROM candidatas_previas c
     WHERE NOT EXISTS (
-        SELECT 1 FROM cand o
+        SELECT 1 FROM candidatas_previas o
         WHERE o.patient = c.patient
           AND (ABS(o.dias), -epoch(o.date), o.encounter, o.valor)
               < (ABS(c.dias), -epoch(c.date), c.encounter, c.valor)
@@ -1371,13 +1398,13 @@ SELECT COUNT(*)                                    AS filas,
 FROM visitas;
 
 -- [Q:selfjoin] Resumen con self-join, sin funciones de ventana
-WITH v AS (
+WITH visitas_base AS (
     SELECT patient, id, start, CAST(start AS DATE) AS fecha FROM encounters
 ),
 anterior AS (
     SELECT a.id, a.fecha, MAX(b.start) AS start_previa
-    FROM v a
-    LEFT JOIN v b
+    FROM visitas_base a
+    LEFT JOIN visitas_base b
            ON b.patient = a.patient
           AND (b.start, b.id) < (a.start, a.id)       -- todas las visitas previas
     GROUP BY a.id, a.fecha                             -- la más reciente = MAX
@@ -1424,14 +1451,14 @@ FROM visitas;
 WITH top50 AS (
     SELECT patient FROM encounters GROUP BY patient ORDER BY COUNT(*) DESC, patient LIMIT 50
 ),
-v AS (
+visitas_base AS (
     SELECT e.patient, e.id, e.start, CAST(e.start AS DATE) AS fecha
     FROM encounters e JOIN top50 USING (patient)
 ),
 anterior AS (
     SELECT a.id, a.fecha, MAX(b.start) AS start_previa
-    FROM v a
-    LEFT JOIN v b ON b.patient = a.patient AND (b.start, b.id) < (a.start, a.id)
+    FROM visitas_base a
+    LEFT JOIN visitas_base b ON b.patient = a.patient AND (b.start, b.id) < (a.start, a.id)
     GROUP BY a.id, a.fecha
 )
 SELECT COUNT(*) AS filas,
