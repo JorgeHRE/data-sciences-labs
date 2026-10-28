@@ -721,3 +721,192 @@ SELECT
                                   AND elegibles.fecha_alta + INTERVAL 30 DAY
     )) AS readmisiones                                                          -- 1,171
 FROM elegibles;
+
+
+-- =============================================================================
+-- Actividad 6: Episodios de tratamiento continuo (gaps and islands)
+-- Fármaco principal: 1 ML Epoetin Alfa 4000 UNT/ML Injection [Epogen]
+--                    (81,102 recetas, 272 pacientes, todas con stop)
+-- Fármaco de contraste: lisinopril 10 MG Oral Tablet (41,278 recetas, 1,432 pac.)
+-- Pregunta analítica: ¿cuántos episodios continuos de tratamiento hay por
+--                     paciente y cuánto duran, con gaps de 30, 60 y 90 días?
+-- =============================================================================
+-- DECISIONES DECLARADAS (confirmadas con el usuario):
+--  (1) Fármaco principal: Epoetina alfa. Se probó primero lisinopril y los gaps
+--      de 30/60/90 dan lo mismo (1 episodio por paciente, 1,432 en total): los
+--      crónicos orales se prescriben de forma continua hasta el corte y las
+--      recetas largas (hasta 434 días) cubren los huecos. Pasa igual con
+--      hidroclorotiazida, amlodipino, simvastatina, insulina, metformina,
+--      tacrolimus, ibuprofeno y alendronato. Solo los intermitentes (Epoetina,
+--      cisplatino, paclitaxel) hacen variar el gap, por eso Epoetina es el
+--      principal y lisinopril queda como contraste.
+--  (2) Receta SIN stop: se trata como activa hasta la fecha de corte de los
+--      datos (MAX(start) de encounters = 2026-10-26) y el episodio se marca
+--      `censurado`. En Epoetina no hay ninguna; afecta solo al contraste
+--      (1,432 recetas abiertas de lisinopril, una por paciente).
+--  (3) Recetas solapadas: no se usa LAG(fin) sino el FIN MÁXIMO ACUMULADO de
+--      todas las recetas previas del paciente. Con LAG, un solape dejaría un
+--      fin falso y partiría episodios continuos. En lisinopril la diferencia
+--      es grande: LAG veía 94 huecos > 30 días y el acumulado, ninguno.
+--  (4) Regla del hueco: una receta abre un episodio nuevo si
+--      inicio - fin_acumulado_previo > gap. Con gap = 30, un hueco de exactamente
+--      30 días NO corta (convención de DRUG_ERA de OMOP).
+--  (5) Fechas en días calendario (CAST AS DATE). Filtro por description
+--      (por código, lisinopril 10 mg es 314076; otros códigos son otras dosis).
+-- -----------------------------------------------------------------------------
+-- RESULTADOS MEDIDOS (episodios con gap 30 / 60 / 90):
+--   Epoetina:   785 / 369 / 319 episodios (272 pacientes).
+--   Lisinopril: 1,432 / 1,432 / 1,432 (1,432 pacientes).
+--   Cisplatino y paclitaxel (solo explorados): 1,400 / 92 / 68 y 1,342 / 77 / 56.
+-- =============================================================================
+
+-- Episodios por paciente de Epoetina con gap = 30 días (detalle)
+WITH corte AS (
+    SELECT MAX(CAST(start AS DATE)) AS fecha_corte FROM encounters      -- 2026-10-26
+),
+recetas AS (
+    SELECT
+        m.patient,
+        CAST(m.start AS DATE)                              AS ini,
+        COALESCE(CAST(m.stop AS DATE), c.fecha_corte)      AS fin,      -- decisión (2)
+        (m.stop IS NULL)                                   AS abierta
+    FROM medications m
+    CROSS JOIN corte c
+    WHERE m.description = '1 ML Epoetin Alfa 4000 UNT/ML Injection [Epogen]'
+),
+con_fin_previo AS (
+    SELECT
+        *,
+        -- Fin máximo de TODAS las recetas anteriores del paciente (decisión 3)
+        MAX(fin) OVER (
+            PARTITION BY patient ORDER BY ini, fin
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ) AS fin_previo
+    FROM recetas
+),
+con_episodio AS (
+    SELECT
+        *,
+        -- Suma acumulada de los "cortes" = número de episodio dentro del paciente.
+        -- Corte = primera receta, o hueco > 30 días (decisión 4).
+        SUM(CASE WHEN fin_previo IS NULL OR date_diff('day', fin_previo, ini) > 30
+                 THEN 1 ELSE 0 END) OVER (
+            PARTITION BY patient ORDER BY ini, fin
+            ROWS UNBOUNDED PRECEDING
+        ) AS episodio
+    FROM con_fin_previo
+)
+SELECT
+    patient,
+    episodio,
+    MIN(ini)                                  AS inicio_episodio,
+    MAX(fin)                                  AS fin_episodio,
+    date_diff('day', MIN(ini), MAX(fin))      AS duracion_dias,
+    COUNT(*)                                  AS n_recetas,
+    BOOL_OR(abierta)                          AS censurado
+FROM con_episodio
+GROUP BY patient, episodio
+ORDER BY patient, episodio;
+
+-- Comparación de gaps 30 / 60 / 90 para Epoetina y lisinopril
+-- (misma lógica; fármaco y gap entran como parámetros vía CROSS JOIN)
+WITH corte AS (
+    SELECT MAX(CAST(start AS DATE)) AS fecha_corte FROM encounters
+),
+gaps(gap) AS (VALUES (30), (60), (90)),
+farmacos(description) AS (VALUES
+    ('1 ML Epoetin Alfa 4000 UNT/ML Injection [Epogen]'),
+    ('lisinopril 10 MG Oral Tablet')),
+recetas AS (
+    SELECT m.description, m.patient, CAST(m.start AS DATE) AS ini,
+           COALESCE(CAST(m.stop AS DATE), c.fecha_corte) AS fin
+    FROM medications m
+    CROSS JOIN corte c
+    WHERE m.description IN (SELECT description FROM farmacos)
+),
+con_fin_previo AS (
+    SELECT *, MAX(fin) OVER (
+               PARTITION BY description, patient ORDER BY ini, fin
+               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS fin_previo
+    FROM recetas
+),
+con_episodio AS (
+    SELECT g.gap, r.*,
+           SUM(CASE WHEN r.fin_previo IS NULL
+                      OR date_diff('day', r.fin_previo, r.ini) > g.gap
+                    THEN 1 ELSE 0 END) OVER (
+               PARTITION BY g.gap, r.description, r.patient ORDER BY r.ini, r.fin
+               ROWS UNBOUNDED PRECEDING) AS episodio
+    FROM con_fin_previo r CROSS JOIN gaps g
+),
+episodios AS (
+    SELECT description, gap, patient, episodio,
+           date_diff('day', MIN(ini), MAX(fin)) AS duracion_dias,
+           COUNT(*) AS n_recetas
+    FROM con_episodio
+    GROUP BY description, gap, patient, episodio
+)
+SELECT
+    left(description, 20)            AS farmaco,
+    gap,
+    COUNT(*)                         AS n_episodios,
+    COUNT(DISTINCT patient)          AS n_pacientes,
+    ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT patient), 2) AS episodios_por_paciente,
+    MEDIAN(duracion_dias)            AS mediana_duracion_dias,
+    SUM(n_recetas)                   AS recetas_cubiertas     -- 81,102 / 41,278 en todos los gaps
+FROM episodios
+GROUP BY description, gap
+ORDER BY description, gap;
+
+-- Histograma de duraciones de episodios de Epoetina (gap = 30):
+-- intervalos de 30 días, el último agrupa "360+"
+WITH recetas AS (
+    SELECT patient, CAST(start AS DATE) AS ini, CAST(stop AS DATE) AS fin
+    FROM medications
+    WHERE description = '1 ML Epoetin Alfa 4000 UNT/ML Injection [Epogen]'
+),
+con_fin_previo AS (
+    SELECT *, MAX(fin) OVER (PARTITION BY patient ORDER BY ini, fin
+               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS fin_previo
+    FROM recetas
+),
+con_episodio AS (
+    SELECT *, SUM(CASE WHEN fin_previo IS NULL
+                        OR date_diff('day', fin_previo, ini) > 30 THEN 1 ELSE 0 END)
+              OVER (PARTITION BY patient ORDER BY ini, fin ROWS UNBOUNDED PRECEDING) AS episodio
+    FROM con_fin_previo
+),
+episodios AS (
+    SELECT patient, episodio, date_diff('day', MIN(ini), MAX(fin)) AS duracion_dias
+    FROM con_episodio GROUP BY patient, episodio
+),
+cubetas AS (
+    SELECT LEAST(duracion_dias // 30, 12) AS cubeta, COUNT(*) AS n
+    FROM episodios GROUP BY 1
+)
+SELECT
+    CASE WHEN cubeta = 12 THEN '360+'
+         ELSE (cubeta * 30) || '-' || (cubeta * 30 + 29) END AS rango_dias,
+    n,
+    repeat('#', CAST(ROUND(60.0 * n / MAX(n) OVER ()) AS INTEGER)) AS barra
+FROM cubetas
+ORDER BY cubeta;
+
+-- Control independiente (Epoetina, gap = 30): el número de episodios debe
+-- coincidir con contar, SIN ventanas, las recetas para las que NO existe otra
+-- receta previa del mismo paciente cuyo fin quede a <= 30 días de su inicio
+-- (o después de él).
+WITH r AS (
+    SELECT row_number() OVER () AS rid, patient, CAST(start AS DATE) AS ini,
+           CAST(stop AS DATE) AS fin
+    FROM medications
+    WHERE description = '1 ML Epoetin Alfa 4000 UNT/ML Injection [Epogen]'
+)
+SELECT COUNT(*) AS episodios_control                                  -- debe = 785
+FROM r a
+WHERE NOT EXISTS (
+    SELECT 1 FROM r b
+    WHERE b.patient = a.patient
+      AND (b.ini, b.fin, b.rid) < (a.ini, a.fin, a.rid)
+      AND date_diff('day', b.fin, a.ini) <= 30
+);
