@@ -910,3 +910,132 @@ WHERE NOT EXISTS (
       AND (b.ini, b.fin, b.rid) < (a.ini, a.fin, a.rid)
       AND date_diff('day', b.fin, a.ini) <= 30
 );
+
+
+-- =============================================================================
+-- Actividad 7: Deduplicar con ROW_NUMBER (última medición por paciente y analito)
+-- Pregunta analítica: quedarse con UNA observación por (paciente, analito): la
+--                     más reciente.
+-- =============================================================================
+-- DECISIONES DECLARADAS (confirmadas con el usuario):
+--  (1) Analito = `code` (LOINC), no `description`: 19 códigos traen dos
+--      descripciones (p. ej. 'Glucose' y 'Glucose [Mass/volume] in Blood');
+--      por descripción se partiría un mismo analito en dos
+--      (388,099 pares frente a 384,983 por código).
+--  (2) Desempate cuando hay misma fecha (14,934 grupos paciente-código-fecha con
+--      más de una fila, 13,774 con valores distintos), en este orden:
+--        a. date DESC                      -> la más reciente
+--        b. valor numérico antes que texto -> más defendible clínicamente
+--        c. encounter DESC, value DESC     -> solo para que sea reproducible;
+--                                             este último criterio NO es clínico
+--  (3) Alcance: TODAS las observaciones (numéricas y de texto, todas las
+--      categorías). Las actividades 8 y 9 filtrarán laboratorio y valor numérico.
+--  (4) Patrón principal: CTE + WHERE rn = 1. Contraste: QUALIFY (misma lógica).
+-- Por qué rn = 1 NO puede ir en el WHERE de la misma consulta: el orden lógico es
+-- FROM -> WHERE -> GROUP BY -> HAVING -> funciones de ventana -> SELECT, así que
+-- cuando se evalúa el WHERE la columna `rn` todavía no existe. Hay que calcularla
+-- en un nivel interno (CTE/subconsulta) y filtrarla en el externo, o usar QUALIFY.
+-- -----------------------------------------------------------------------------
+-- RESULTADOS MEDIDOS: 5,719,327 filas -> 384,983 (un renglón por paciente y
+-- código, 0 pares duplicados, fecha elegida = máxima del par en todos). CTE y
+-- QUALIFY dan el mismo resultado (EXCEPT en ambas direcciones: 0 filas). Solo
+-- 870 pares tienen empate en su ÚLTIMA fecha y en 746 los valores difieren: ahí
+-- el desempate decide el dato conservado (ver decisión 2).
+-- =============================================================================
+
+-- Conteos antes y después (sin deduplicar frente a un renglón por par)
+SELECT
+    COUNT(*)                                       AS filas_antes,         -- 5,719,327
+    COUNT(DISTINCT (patient, code))                AS pares_paciente_analito  -- 384,983 = filas_despues
+FROM observations;
+
+-- Camino principal: CTE con ROW_NUMBER y filtro externo
+WITH ordenadas AS (
+    SELECT
+        o.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY patient, code                          -- un analito por paciente
+            ORDER BY
+                date DESC,                                      -- (2a) la más reciente
+                CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL
+                     THEN 0 ELSE 1 END,                         -- (2b) numérico primero
+                encounter DESC,                                 -- (2c) reproducible
+                value DESC
+        ) AS rn
+    FROM observations o
+)
+SELECT date, patient, encounter, category, code, description, value, units, type
+FROM ordenadas
+WHERE rn = 1;
+
+-- Contraste con QUALIFY (DuckDB filtra por la ventana sin CTE) y verificación
+-- de equivalencia con EXCEPT en ambas direcciones (deben dar 0 filas).
+WITH principal AS (
+    SELECT date, patient, encounter, code, value
+    FROM (
+        SELECT o.*, ROW_NUMBER() OVER (
+            PARTITION BY patient, code
+            ORDER BY date DESC,
+                     CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL THEN 0 ELSE 1 END,
+                     encounter DESC, value DESC) AS rn
+        FROM observations o
+    )
+    WHERE rn = 1
+),
+con_qualify AS (
+    SELECT date, patient, encounter, code, value
+    FROM observations
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY patient, code
+        ORDER BY date DESC,
+                 CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL THEN 0 ELSE 1 END,
+                 encounter DESC, value DESC) = 1
+)
+SELECT
+    (SELECT COUNT(*) FROM principal)                                   AS filas_principal,   -- 384,983
+    (SELECT COUNT(*) FROM con_qualify)                                 AS filas_qualify,     -- 384,983
+    (SELECT COUNT(*) FROM (SELECT * FROM principal EXCEPT SELECT * FROM con_qualify)) AS solo_en_principal,  -- 0
+    (SELECT COUNT(*) FROM (SELECT * FROM con_qualify EXCEPT SELECT * FROM principal)) AS solo_en_qualify;    -- 0
+
+-- Control independiente (sin ventanas): un renglón por par y la fecha elegida
+-- es la máxima del par. Se espera 0 pares duplicados y 0 fechas distintas del máximo.
+WITH elegidas AS (
+    SELECT patient, code, date
+    FROM (
+        SELECT patient, code, date, ROW_NUMBER() OVER (
+            PARTITION BY patient, code
+            ORDER BY date DESC,
+                     CASE WHEN TRY_CAST(value AS DOUBLE) IS NOT NULL THEN 0 ELSE 1 END,
+                     encounter DESC, value DESC) AS rn
+        FROM observations
+    )
+    WHERE rn = 1
+),
+maximos AS (
+    SELECT patient, code, MAX(date) AS fecha_max
+    FROM observations
+    GROUP BY patient, code
+)
+SELECT
+    COUNT(*)                                                    AS filas_elegidas,           -- 384,983
+    COUNT(*) - COUNT(DISTINCT (e.patient, e.code))              AS pares_duplicados,         -- 0
+    COUNT(*) FILTER (WHERE e.date <> m.fecha_max)               AS fecha_distinta_del_maximo -- 0
+FROM elegidas e
+JOIN maximos m USING (patient, code);
+
+-- Cuántos pares dependen del desempate: la fecha máxima del par tiene varias filas
+-- y no todas coinciden en valor (aquí el criterio 2b/2c decide qué se conserva).
+WITH por_par AS (
+    SELECT patient, code, MAX(date) AS fecha_max FROM observations GROUP BY patient, code
+)
+SELECT
+    COUNT(*)                                          AS pares_con_empate_en_ultima_fecha,
+    COUNT(*) FILTER (WHERE valores_distintos > 1)     AS de_ellos_con_valores_distintos
+FROM (
+    SELECT p.patient, p.code, COUNT(*) AS filas, COUNT(DISTINCT o.value) AS valores_distintos
+    FROM por_par p
+    JOIN observations o
+      ON o.patient = p.patient AND o.code = p.code AND o.date = p.fecha_max
+    GROUP BY p.patient, p.code
+    HAVING COUNT(*) > 1
+);
