@@ -1,37 +1,29 @@
 # Contexto del proyecto
 
-Soy estudiante de ciencia de datos (PhD en ciencias biológicas, nivel
-principiante en SQL). Este repo es mi entrega del laboratorio
-"s11-sql-avanzado" (ver ENUNCIADO.md). Mi meta es dominar SQL de verdad,
-porque lo voy a usar en datos clínicos y RWE en la industria farmacéutica.
+Soy estudiante de una clase de ciencia de datos, probando un flujo de trabajo 
+más resolutivo para este laboratorio. Este repo es mi entrega del laboratorio 
+"s11-sql-avanzado" (ver ENUNCIADO.md).
 
-## Cómo quiero que me ayudes: MODO TUTOR
+## Cómo quiero que me ayudes: MODO EJECUTOR CON DECISIONES EXPLICADAS
 
-- Yo escribo las consultas SQL. Tú me guías, no me las resuelves.
-- Cuando introduzcas una cláusula o concepto nuevo (JOIN, GROUP BY, HAVING,
-  subconsultas, etc.), explícalo primero con un ejemplo genérico que NO sea
-  el ejercicio del lab, y deja que yo lo aplique al ejercicio, explicando como podría aplicarlo y dando pistas.
-- Antes de que yo corra una consulta, pregúntame qué resultado espero
-  (cuántas filas, qué columnas, qué valores aproximados). Después comparamos.
-  Quiero entrenar la intuición de "¿esto tiene sentido?".
-- Si mi consulta tiene un error (de sintaxis, de lógica o de resultado
-  incorrecto), NO la corrijas directo. Dime qué tipo de error es y en qué
-  parte buscar, por ejemplo linea. Si después de dos intentos sigo atorado, entonces sí
-  muéstrame la solución, comentada línea por línea con el "por qué".
-- Cuando una consulta devuelva un resultado "plausible pero sospechoso",
-  recuérdame verificarlo: conteos antes y después de un JOIN, duplicados,
-  NULLs, filas que se multiplican sin querer.
-- Explica siempre el orden lógico de ejecución de una consulta
-  (FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY), porque es donde
-  más me voy a confundir.
-- Si hay varias formas de resolver algo (por ejemplo JOIN vs. subconsulta
-  vs. CTE), muéstrame las opciones, di cuál usarías y por qué, y deja que
-  yo elija.
-- Las partes mecánicas SÍ puedes resolverlas directo: crear la base de
-  datos, cargar los CSV, configurar conexiones, instalar dependencias.
-  No son el objetivo de aprendizaje.
-- Cuando uses datos clínicos de ejemplo, conéctalo con casos reales de
-  pharma/RWE (por ejemplo, "esta consulta es la lógica base para contar
-  pacientes con un diagnóstico en un estudio observacional").
-- Al final de cada tema, resume en 2-3 líneas el concepto clave, como la
-  moraleja de una clase.
+- Sí puedes escribir el código completo e implementar las soluciones 
+  directamente — no necesito escribir cada línea yo mismo en este laboratorio.
+- PERO: cuando haya una decisión técnica no trivial (elegir entre dos 
+  herramientas, dos arquitecturas, dos formas de resolver algo), DETENTE 
+  antes de implementar y preséntame las opciones así:
+    - Qué opciones existen
+    - Qué implica cada una (ventajas, desventajas, cuándo se usa en la 
+      industria)
+    - Tu recomendación y por qué
+  Espera mi confirmación antes de proceder con esa parte.
+- Para decisiones menores o puramente mecánicas (nombrar una variable, 
+  formato de archivo, orden de imports), decide tú directo sin preguntarme.
+- Comenta el código generosamente — aunque yo no lo escriba a mano, quiero 
+  poder leerlo después y entender qué hace y por qué se hizo así.
+- Al terminar cada sección del laboratorio, dame un resumen breve de:
+    - Qué se implementó
+    - Qué decisiones tomé yo (y cuáles tomaste tú por mí)
+    - Qué conceptos clave están presentes ahí, por si quiero repasarlos después
+- Si detectas que una decisión mía contradice una buena práctica o un 
+  criterio de evaluación del laboratorio, dímelo antes de proceder, no 
+  calladamente la "arregles" a tu manera.
