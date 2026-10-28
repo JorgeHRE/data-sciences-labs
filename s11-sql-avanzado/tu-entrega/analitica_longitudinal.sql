@@ -613,3 +613,111 @@ intervalos AS (
 )
 SELECT COUNT(*) AS filas, MEDIAN(dias) AS mediana_dias_B               -- 411,820 / 14
 FROM intervalos;
+
+
+-- =============================================================================
+-- Actividad 5: Readmisión a 30 días
+-- Pregunta analítica: ¿qué proporción de las altas hospitalarias elegibles
+--                     termina en un nuevo ingreso dentro de los 30 días?
+-- =============================================================================
+-- DECISIONES DECLARADAS (confirmadas con el usuario):
+--  (1) TODAS las readmisiones cuentan (no solo la primera por paciente). La
+--      unidad es el ALTA: cada alta se empareja con el SIGUIENTE ingreso del
+--      mismo paciente (LEAD), así que un alta se readmite a lo sumo una vez.
+--      Se reporta además cuántos pacientes distintos se readmiten.
+--  (2) El día 30 ENTRA: readmisión = 0 <= dias_a_sig <= 30, con la diferencia
+--      en días calendario entre fecha de alta y fecha del siguiente ingreso.
+--      Sensibilidad con < 30 en la consulta de resumen.
+--  (3) Ingreso el MISMO día del alta (diferencia 0): SÍ cuenta (249 casos).
+--      Puede ser un traslado y no una readmisión clínica; se reporta aparte.
+--      Ingreso ANTES del alta previa (solape, 89 casos): dato inconsistente;
+--      se EXCLUYE del numerador y del denominador, sin corregirlo.
+--  (4) Alta elegible = alta de un ingreso 'inpatient' cuyo paciente no murió
+--      en la fecha del alta o antes (118 excluidas) y sin solape (89).
+--      7,867 altas totales = 7,660 elegibles + 118 fallecido + 89 solape.
+-- -----------------------------------------------------------------------------
+-- RESULTADOS MEDIDOS: 1,171 readmisiones sobre 7,660 altas elegibles
+--   => tasa 15.29 %, en 336 pacientes distintos.
+--   Sensibilidades: con < 30 días 1,002 (13.08 %); sin contar el mismo día
+--   922 (12.04 %).
+-- =============================================================================
+
+WITH ingresos AS (
+    SELECT
+        e.id,
+        e.patient,
+        CAST(e.start AS DATE)      AS fecha_ingreso,
+        CAST(e.stop  AS DATE)      AS fecha_alta,
+        CAST(p.deathdate AS DATE)  AS fallecimiento
+    FROM encounters e
+    JOIN patients p ON p.id = e.patient
+    WHERE e.encounterclass = 'inpatient'
+),
+altas AS (
+    SELECT
+        *,
+        -- Fecha del SIGUIENTE ingreso del mismo paciente (NULL si es el último)
+        LEAD(fecha_ingreso) OVER (
+            PARTITION BY patient ORDER BY fecha_ingreso, id
+        ) AS sig_ingreso
+    FROM ingresos
+),
+clasificadas AS (
+    SELECT
+        *,
+        date_diff('day', fecha_alta, sig_ingreso) AS dias_a_sig,
+        CASE
+            WHEN fallecimiento IS NOT NULL AND fallecimiento <= fecha_alta THEN 'excl_fallecido'
+            WHEN sig_ingreso < fecha_alta                                  THEN 'excl_solape'
+            ELSE 'elegible'
+        END AS estado
+    FROM altas
+)
+SELECT
+    COUNT(*)                                                             AS altas_totales,        -- 7,867
+    COUNT(*) FILTER (WHERE estado = 'excl_fallecido')                    AS excl_fallecido,       -- 118
+    COUNT(*) FILTER (WHERE estado = 'excl_solape')                       AS excl_solape,          -- 89
+    COUNT(*) FILTER (WHERE estado = 'elegible')                          AS altas_elegibles,      -- 7,660
+    COUNT(*) FILTER (WHERE estado = 'elegible' AND dias_a_sig <= 30)     AS readmisiones,         -- 1,171
+    ROUND(100.0 * COUNT(*) FILTER (WHERE estado = 'elegible' AND dias_a_sig <= 30)
+          / COUNT(*) FILTER (WHERE estado = 'elegible'), 2)              AS tasa_pct,             -- 15.29
+    COUNT(DISTINCT patient) FILTER (WHERE estado = 'elegible' AND dias_a_sig <= 30)
+                                                                         AS pacientes_readmitidos,-- 336
+    COUNT(*) FILTER (WHERE estado = 'elegible' AND dias_a_sig = 0)       AS readm_mismo_dia,      -- 249
+    COUNT(*) FILTER (WHERE estado = 'elegible' AND dias_a_sig < 30)      AS readm_estricto_lt30,  -- 1,002
+    COUNT(*) FILTER (WHERE estado = 'elegible' AND dias_a_sig BETWEEN 1 AND 30)
+                                                                         AS readm_sin_mismo_dia   -- 922
+FROM clasificadas;
+
+-- Control independiente: misma cifra SIN LEAD, con EXISTS sobre los ingresos.
+-- Un alta elegible se readmite si existe algún ingreso del mismo paciente
+-- entre su fecha de alta y alta + 30 días (el más cercano sería el siguiente).
+WITH ingresos AS (
+    SELECT e.id, e.patient, CAST(e.start AS DATE) AS fecha_ingreso,
+           CAST(e.stop AS DATE) AS fecha_alta, CAST(p.deathdate AS DATE) AS fallecimiento
+    FROM encounters e JOIN patients p ON p.id = e.patient
+    WHERE e.encounterclass = 'inpatient'
+),
+elegibles AS (
+    SELECT i.*
+    FROM ingresos i
+    WHERE (i.fallecimiento IS NULL OR i.fallecimiento > i.fecha_alta)
+      -- sin solape: ningún OTRO ingreso empieza dentro de esta estancia ya iniciada
+      -- (equivale a "el siguiente ingreso no empieza antes del alta previa")
+      AND NOT EXISTS (
+          SELECT 1 FROM ingresos s
+          WHERE s.patient = i.patient AND s.id <> i.id
+            AND (s.fecha_ingreso, s.id) > (i.fecha_ingreso, i.id)
+            AND s.fecha_ingreso < i.fecha_alta
+      )
+)
+SELECT
+    COUNT(*) AS altas_elegibles,                                                -- 7,660
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM ingresos s
+        WHERE s.patient = elegibles.patient AND s.id <> elegibles.id
+          AND (s.fecha_ingreso, s.id) > (elegibles.fecha_ingreso, elegibles.id)
+          AND s.fecha_ingreso BETWEEN elegibles.fecha_alta
+                                  AND elegibles.fecha_alta + INTERVAL 30 DAY
+    )) AS readmisiones                                                          -- 1,171
+FROM elegibles;
