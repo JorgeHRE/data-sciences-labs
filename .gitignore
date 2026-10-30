@@ -19,3 +19,8 @@ __pycache__/
 
 # Instrucciones del lab 11 (solo referencia local)
 s11-sql-avanzado/ENUNCIADO.md
+
+# Instrucciones del lab 12 (solo referencia local) y vocabularios de ATHENA (licencia, no redistribuibles)
+s12-omop-cdm-introduccion/ENUNCIADO.md
+vocabularios/
+s12-omop-cdm-introduccion/tu-entrega/vocab/
