@@ -35,5 +35,25 @@ services:
       timeout: 5s
       retries: 20
 
+  # ETL-Synthea (actividad 2). Perfil "etl": no arranca con `up -d db`; se lanza a mano:
+  #   docker compose run --rm etl
+  etl:
+    profiles: ["etl"]
+    build: ./etl
+    image: lab12-etl-synthea
+    depends_on:
+      db:
+        condition: service_healthy   # espera al healthcheck de la base
+    environment:
+      DB_HOST: db                    # nombre del servicio: la red de compose lo resuelve
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      SYNTHEA_CSV_DIR: /data/synthea
+    volumes:
+      - ./etl:/etl:ro                # scripts del ETL: se editan sin reconstruir la imagen
+      # CSV de Synthea v3.3.0 (5,000 pacientes), generados en la sesión 10; solo lectura.
+      - ../../s10-sql-fundamentals/tu-entrega/data/synthea/csv:/data/synthea:ro
+
 volumes:
   pgdata:
