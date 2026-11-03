@@ -81,3 +81,48 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Veredicto:** (A) simplificación legítima, las FK suelen añadirse después de la carga masiva; (D) hueco real, causado por una decisión mía documentada (decisión 9).
 - **Alternativas descartadas:** PK compuesta de `concept_relationship` (la añadí en `02_indices_vocabularios.sql:21`; el estándar no la marca) y las 6 tablas auxiliares (no son del CDM); ambas con veredicto «legítima», que no mostraba contraste.
 - **Límite:** la especificación se leyó con un resumen automático; la celda de `concept_relationship` no se citó en el entregable.
+
+## 15. Qué columnas cuentan en el porcentaje de `concept_id = 0` (actividad 5)
+- **Decisión:** medir el concepto principal de cada dominio (estándar) y su `*_source_concept_id` (origen), con **todas las filas** como denominador. No se miden las columnas opcionales (`*_type_`, `*_status_`, etc.).
+- **Alternativas:** solo el concepto principal (no explica por qué un dominio sale peor); todas las columnas `*_concept_id` (los ceros de columnas opcionales vacías inflan el porcentaje).
+- **Por qué:** el estándar mide la calidad del mapeo; el origen distingue «código fuera de los vocabularios» de «sin destino estándar».
+
+## 16. Los ceros no miden completitud: se compara contra la fuente (actividad 5)
+- **Hallazgo:** casi todos los dominios dan 0 %, porque ETL-Synthea descarta lo que no mapea y no lo escribe con 0. Excepciones: raza 2.79 % (165 personas) y `visit_source_concept_id` 100 % (columna opcional que el ETL no llena; no es fallo).
+- **Decisión:** medir la pérdida comparando `native.*` con el CDM, clasificando por **código distinto** (un JOIN directo al mapa multiplica filas de códigos con varios destinos) y comprobando que la suma sea el total de la fuente.
+- **Resultado en `conditions`:** 235,504 filas = 5,153 + 96,438 → `condition_occurrence`, 129,201 → `observation`, 4,712 sin escribir (2.00 %). Cuadra con el CDM (101,699 − 108 por multi-mapeo + 129,201). Esta cifra sustituye a las «4,601 por confirmar».
+- **Límite:** la cuadratura es aritmética (conteos), no identidad fila a fila; y no se ha verificado que las filas de `observation` sean las de conditions.
+
+## 17. Diagnóstico de los 27 códigos de `conditions` sin destino (actividad 5)
+- **Hallazgo:** los 27 existen en `concept` (ninguno estándar) y ninguno tiene `Maps to` ni `Concept replaced by`. Los 7 ICD10 (metástasis C77/C79) solo tienen `Is a`; 15 SNOMED tienen `Maps to value` (mapeo poscoordinado) pero no `Maps to`, que es la única relación que usa ETL-Synthea. Pérdida concentrada: sobredosis (907 filas), dependencia de drogas (323), concusión (314), metástasis (43).
+- **No determinado:** si el `Maps to` falta en el vocabulario oficial o solo en esta descarga (hipótesis b: el destino está en un vocabulario no descargado). La BD no lo decide; se contrasta en ATHENA (act. 9).
+- **Control sin poder:** `concept_relationship` tiene 0 filas inválidas, así que filtrar por `invalid_reason` no distingue nada en esta descarga.
+
+## 18. `medications` y `immunizations`: completitud (actividad 5)
+- **medications:** 0 pérdida. 345 códigos RxNorm → `Drug`; un código con 2 destinos duplica 42 filas (388,616 + 84 = 388,700 = filas de tipo 32838 en `drug_exposure`). Filtrar `source_vocabulary_id = 'RxNorm'` es obligatorio: hay colisiones numéricas con OSM (Geography).
+- **immunizations:** 86,068 → 78,890; **7,178 filas (8.3 %) perdidas, todas de 3 códigos COVID-19 (CVX 207: 3,133; 208: 3,845; 212: 200), 100 % de cada uno**. Los otros 19 códigos pierden 0 %.
+- **Causa (leída en el código del ETL, no inferida):** el INSERT de vacunas exige `target_vocabulary_id = 'CVX'`; las COVID se mapean de CVX a RxNorm, así que el INNER JOIN las descarta en silencio.
+- **Lección de método:** el mapa solo habría predicho 0 % de pérdida (los 22 códigos tienen destino `Drug` estándar). La pérdida se vio al cuadrar fuente contra CDM. Cuadrar la salida es la comprobación que no depende de suponer qué hace el ETL.
+- **No decidido:** si corregir el ETL (aceptar destinos RxNorm) o solo documentarlo. Afecta a cualquier cohorte de vacunación COVID, que saldría vacía.
+
+## 19. `procedures`: la mayor pérdida del lab (actividad 5)
+- **Resultado:** de 869,518 filas llegan 701,419 (454,821 a `procedure_occurrence` + 246,598 a `measurement`); **168,099 perdidas (19.3 %)**. Cuadra exacto: ambos destinos coinciden con el CDM, y el control (0 códigos compartidos con `observations`) podía fallar.
+- **Causa 1, 100,892 filas:** destino `Observation` (p. ej. derivación a dental 40,870; cuidados paliativos 20,773). Los INSERT que leen `procedures` son solo `insert_procedure_occurrence.sql` e `insert_measurement.sql`; ninguno escribe en `observation`. Más 1,507 Drug, 497 Device y 118 Condition, por lo mismo.
+- **Causa 2, 65,085 filas sin destino:** 442 códigos (63,383 filas) con patrón `D####` (p. ej. D0120 «periodic oral evaluation», D7140 extracción), ninguno existe en `concept` y la base no tiene ningún vocabulario CDT. Son códigos dentales CDT (vocabulario con licencia, no incluido en la descarga). **Inferido por patrón y descripción, no confirmado en ATHENA** (act. 9). Otros 5 códigos (1,702 filas) existen pero no son estándar.
+- **Decisión (usuario):** solo documentar; no tocar el ETL (ver 18).
+
+## 20. `devices`: completitud (actividad 5)
+- **Resultado:** 9,973 filas de origen → 9,255 en `device_exposure`; **718 perdidas (7.2 %)**, cuadra exacto. Son 3 códigos con 100 % de pérdida: cama de hospital (485), andador (194, deprecado `D`) y máquina de hemodiálisis (39).
+- **Causa:** existen en `concept` pero no son estándar ni tienen `Maps to`/`Concept replaced by`/`Maps to value`; el INSERT exige destino `Device/SNOMED` estándar. Mismo patrón que `conditions` (decisión 17): causa en el vocabulario, no en el ETL. Si falta el `Maps to` en el vocabulario oficial o solo en la descarga: pendiente de ATHENA (act. 9).
+
+## 21. `observations` y `allergies`: completitud (actividad 5)
+- **observations (5,719,327 filas):** 3,761,682 → `measurement` (cuadra: 4,008,280 − 246,598 de procedures); 1,795,820 → `observation` (cuadra: filas con `observation_source_value` en códigos de observations; control sin solapes con conditions/allergies/procedures). **Perdidas 161,825 (2.83 %):** 161,527 sin destino + 194 Note + 104 Procedure (el ETL no los escribe).
+- **Concentración:** 159,864 de las 161,527 sin destino son QOLS, QALY y DALY (53,288 cada una), métricas de calidad de vida de Synthea sin código LOINC. Además 1,028 de dos códigos locales `X9999-x`. El resto (~635 filas) son LOINC de oncología (estadio clínico, HER2, receptores de estrógeno/progesterona) sin destino estándar: pocas filas pero clínicamente relevantes; refuerza el patrón de metástasis (decisión 17).
+- **allergies (5,262):** 4,604 → `observation` (cuadra); **658 perdidas (12.5 %)**: 484 sin destino y 174 con destino `Drug`, que el INSERT de alergias no escribe.
+- **Fuentes que ETL-Synthea no carga (por diseño):** `careplans` 20,770, `imaging_studies` 658,769, `supplies` 58,104 y `claims`/`claims_transactions`; no se miden porque el CDM v5.4 de este ETL no tiene destino para ellas (excepto `cost`, omitida). Es un límite de la completitud global.
+
+## 22. Los 165 `race_concept_id = 0` son un fallo del ETL, no del vocabulario (actividad 5)
+- **Causa (leída en `insert_person.sql`):** la raza está escrita a mano: solo `white`→8527, `black`→8516, `asian`→8515; todo lo demás → 0. Los IDs usados son correctos (verificados en `concept`); la etnia también (38003564/38003563, suma 5,904).
+- **Desglose:** `other` 69, `hawaiian` 58, `native` 38 = 165 (2.79 % de las personas).
+- **Recuperable:** 96 personas (58 + 38) tenían concepto estándar disponible, 8557 y 8657, ya presentes en la descarga. Las 69 `other` no tienen categoría OMB estándar equivalente (existe 8522 «Other Race», que no aparece como estándar), así que su 0 es defendible.
+- **Efecto:** cualquier análisis estratificado por raza no vería a los pacientes nativo-hawaianos ni indígenas americanos. Consistente con la decisión 18: solo se documenta, no se corrige el ETL.
