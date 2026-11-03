@@ -64,3 +64,20 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Causa probable (no demostrada):** el SQL de ETL-Synthea numera visitas con ordenamientos con empates (`row_number() over (order by patient)` en `AllVisitTable.sql`; `ORDER BY PRIORITY` y `ORDER BY start, stop` sin desempate), lo que deja la fusión de visitas dependiendo del orden arbitrario de Postgres.
 - **Alternativas:** parchear el SQL del paquete para añadir desempates (descartada: modifica la herramienta oficial y no es el objetivo del lab) o repetir la carga para confirmar la causa (pendiente, 40 min, no cambia la entrega).
 - **Por qué:** el efecto es de 0.009 % y no altera ninguna conclusión de calidad; lo importante es no afirmar «idéntico» cuando se midió una diferencia.
+
+## 12. Alcance y herramienta del diagrama ER (actividad 4)
+- **Decisión:** dibujar el núcleo clínico y el vocabulario (14 tablas) en tres bloques Mermaid, y listar las otras 31 en una tabla con filas y estado (con datos, vacía o auxiliar). Archivo: `diagrama_er.md`.
+- **Alternativas:** las 39 tablas del CDM en un solo diagrama (ilegible); dbdiagram.io o Graphviz (servicio externo o scripts extra, y la imagen ya no se edita como texto).
+- **Por qué:** Mermaid es texto versionado en git y GitHub lo renderiza. Las columnas y PK se extrajeron de `information_schema`, y un script cruzó las 81 columnas dibujadas contra la base (0 discrepancias de nombre, tipo o PK). `device_exposure` (9,255 filas) quedó fuera del diagrama; consta en la tabla de tablas restantes.
+
+## 13. Relaciones hacia `concept`: una línea por tabla (actividad 4)
+- **Decisión:** dibujar solo la línea del concepto principal de cada tabla clínica (`condition_concept_id`, `drug_concept_id`, etc.) y anotar que las demás columnas `*_concept_id` también apuntan a `concept`.
+- **Alternativas:** una línea por columna (unas 40 hacia una sola caja, ilegible); línea estándar más línea de origen por tabla (duplica las líneas; se reconsidera en la act. 7 si hace falta).
+- **Por qué:** muestra el patrón central (todo evento cuelga de un concepto estándar) sin perder legibilidad.
+
+## 14. Dos diferencias frente al estándar v5.4: sin FK y `cost` vacía (actividad 4)
+- **Decisión:** anotar como diferencias (A) 0 llaves foráneas declaradas y (D) `cost` con 0 filas.
+- **Corrección propia:** descarté la candidata «`death` y `concept_ancestor` sin PK». La especificación v5.4 marca Primary Key = FALSE en todos sus campos, así que coinciden con el estándar.
+- **Veredicto:** (A) simplificación legítima, las FK suelen añadirse después de la carga masiva; (D) hueco real, causado por una decisión mía documentada (decisión 9).
+- **Alternativas descartadas:** PK compuesta de `concept_relationship` (la añadí en `02_indices_vocabularios.sql:21`; el estándar no la marca) y las 6 tablas auxiliares (no son del CDM); ambas con veredicto «legítima», que no mostraba contraste.
+- **Límite:** la especificación se leyó con un resumen automático; la celda de `concept_relationship` no se citó en el entregable.
