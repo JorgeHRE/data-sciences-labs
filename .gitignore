@@ -24,3 +24,8 @@ s11-sql-avanzado/ENUNCIADO.md
 s12-omop-cdm-introduccion/ENUNCIADO.md
 vocabularios/
 s12-omop-cdm-introduccion/tu-entrega/vocab/
+
+# Lab 12, act. 10: CDM de referencia descargados (se regeneran con cargar_referencia.sh)
+s12-omop-cdm-introduccion/tu-entrega/referencia/*.zip
+s12-omop-cdm-introduccion/tu-entrega/referencia/gibleed/
+s12-omop-cdm-introduccion/tu-entrega/referencia/mimic/

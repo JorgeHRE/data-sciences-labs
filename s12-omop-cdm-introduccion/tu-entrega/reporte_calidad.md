@@ -221,3 +221,47 @@ Los 27 códigos de `conditions` sin destino (4,465 filas) no son un caso único:
 - **Synthea v3.3.0 genera códigos que SNOMED ya retiró.** En ATHENA, *Drug overdose* figura como **Deprecated** (verificado por URL directa; los conceptos retirados no salen en la búsqueda).
 - **1,230 filas serían recuperables:** sobredosis y dependencia tienen un equivalente estándar vía `Concept poss_eq to` (*Overdose* `607147`, *Substance dependence* `37165431`), pero ETL-Synthea solo sigue `Maps to`. Un ETL de producción lo resolvería con `source_to_concept_map`. Solo se documenta (decisión 18).
 - **`D7140`, `D0120`:** ATHENA no los devuelve y la base no tiene vocabulario CDT: consistente con códigos dentales CDT de licencia restringida, **no confirmado**.
+
+## 9. Actividad 10: comparación con bases de referencia
+
+Las consultas de la act. 6 sobre tres bases (`consultas_omop.sql`, partes 10a-10d; carga en `referencia/cargar_referencia.sh`). Decisiones 30-32.
+
+- **Lab:** nuestra conversión (Synthea 3.3.0, ETL-Synthea, vocabulario 2026).
+- **GiBleed:** el CDM de ejemplo de Eunomia (Synthea vía ETL-Synthea, 2019, vocabulario v5.0 18-JAN-19), recortado para un estudio.
+- **MIMIC:** MIMIC-IV demo en OMOP, 100 pacientes **reales** de UCI (Boston), anonimizados con fechas desplazadas.
+
+| Medida | Lab | GiBleed | MIMIC |
+|---|---|---|---|
+| Personas | 5,904 | 2,694 | 100 |
+| % mujeres | 49.7 | 51.0 | 43.0 |
+| Año de nacimiento (mín. / mediana / máx.) | 1916 / 1981 / 2026 | 1908 / 1961 / 1986 | desplazado (2030-2149) |
+| Mediana de observación | 31.6 años | 57.1 años* | **65 días** |
+| Diagnóstico n.º 1 | Gingivitis (82.8 %) | Osteoarthritis (**100 %**) | ECG: sinus rhythm (91 %) |
+| Essential hypertension | 36.3 % | fuera del top 20 | 53.0 % |
+| Visitas por persona (media / mediana) | 65.4 / 37 | 0.38 / 0** | 8.52 / — |
+| Tipos de visita | 3 | 1 (solo hospitalización) | 6 (4 sin nombre en la descarga) |
+
+\* Solo periodos de personas existentes; hay 2,649 periodos huérfanos (decisión 30). \*\* `visit_occurrence` está recortada: no es comparable. La media de MIMIC es la suma de los 6 tipos (852 visitas / 100 personas); la mediana del total no se calculó.
+
+### ¿Se parece nuestra base a una base OMOP real?
+
+**Como conversión, sí; como datos clínicos, no.**
+
+- **Estructura y convenciones: se parece a la referencia de OHDSI.** Mismo ETL que GiBleed, mismos tipos de visita, mismos dominios, sin `concept_id = 0` en condiciones en ninguna de las tres, y las mismas consultas funcionan sin cambios salvo el esquema. Nuestra base es, de hecho, **más íntegra que GiBleed**: sin periodos huérfanos y con todas las visitas a las que apuntan los eventos.
+- **Contenido: es claramente sintética.** Frente a MIMIC:
+  - **La observación cubre la vida entera** (Synthea simula desde el nacimiento); en una base real cada fuente ve un tramo: 65 días de mediana en un hospital. Es la act. 8 llevada al extremo: en datos reales `observation_period` recorta mucho más.
+  - **Los diagnósticos más frecuentes son de atención primaria y salud oral** (gingivitis, caries, sinusitis), ajenos a un hospital; MIMIC muestra un perfil clínico real de UCI (hipertensión, hiperlipidemia, insuficiencia renal aguda, fibrilación auricular).
+  - **Los datos reales son más sucios:** hallazgos de ECG guardados como condiciones, con miles de registros por paciente (6,531 de ritmo sinusal en 91 pacientes); tipos de visita de vocabularios locales o de facturación; fechas desplazadas que impiden usar el año de calendario.
+  - **Escala:** 100 pacientes no permiten estimar prevalencias; la comparación con MIMIC es cualitativa.
+
+### Qué enseña GiBleed sobre versiones
+
+- **Versión del vocabulario:** *Concussion with no loss of consciousness* afecta a 852 personas en GiBleed (vocabulario 2019) y a ninguna en nuestra base, porque SNOMED la retiró el 2026-01-01 y el ETL la descartó (sección 8). Mismo generador, mismo ETL, otro vocabulario: otro resultado.
+- **Versión de Synthea:** GiBleed no tiene diagnósticos dentales ni de aislamiento social; nuestra versión 3.3 sí. Probablemente porque esos módulos de Synthea son posteriores a 2019 (**no verificado**).
+- **Selección de cohorte:** GiBleed tiene 100 % de artrosis y nadie nacido después de 1986: es una población seleccionada para un estudio (sangrado gastrointestinal), no una muestra general. Sus prevalencias no son comparables con las nuestras.
+
+### Límites
+
+- MIMIC tiene 100 pacientes y una población de UCI: las diferencias reflejan en parte el tipo de centro, no solo lo sintético.
+- 4 tipos de visita de MIMIC sin nombre: falta el vocabulario CMS Place of Service en la descarga (decisión 31).
+- Los defectos de GiBleed (huérfanos, visitas recortadas) se infieren del patrón; no se verificó cómo se generó.
