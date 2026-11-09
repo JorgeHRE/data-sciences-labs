@@ -456,3 +456,33 @@ LEFT JOIN cdm.visit_occurrence v ON v.visit_occurrence_id = co.visit_occurrence_
 WHERE co.condition_start_date < op.observation_period_start_date
 GROUP BY 1
 ORDER BY 1;
+
+-- =====================================================================
+-- Actividad 9. Los tres conceptos más usados, vistos desde la base local
+-- (decisiones 27-28). Sirve para comparar contra ATHENA: la base solo tiene
+-- los vocabularios descargados, ATHENA tiene todos (p. ej. OMOP Extension y
+-- SNOMED Veterinary no están aquí). "Hijos" = descendientes estándar a
+-- distancia 1 en concept_ancestor; también todos los descendientes (nivel > 0,
+-- se excluye el propio concepto, que está a distancia 0).
+-- =====================================================================
+SELECT c.concept_id, c.concept_name, c.vocabulary_id, c.domain_id,
+       c.concept_class_id, c.standard_concept,
+       (SELECT count(*) FROM cdm.concept_ancestor a
+         WHERE a.ancestor_concept_id = c.concept_id
+           AND a.min_levels_of_separation = 1)                    AS hijos_directos,
+       (SELECT count(*) FROM cdm.concept_ancestor a
+         WHERE a.ancestor_concept_id = c.concept_id
+           AND a.min_levels_of_separation > 0)                    AS descendientes,
+       -- códigos de origen con 'Maps to' hacia el concepto (sin el
+       -- auto-mapeo del propio concepto estándar), agrupados por vocabulario
+       (SELECT string_agg(s.vocabulary_id || ' ' || s.concept_code, ', '
+                          ORDER BY s.vocabulary_id, s.concept_code)
+          FROM cdm.concept_relationship r
+          JOIN cdm.concept s ON s.concept_id = r.concept_id_1
+         WHERE r.concept_id_2 = c.concept_id
+           AND r.relationship_id = 'Maps to'
+           AND r.invalid_reason IS NULL
+           AND r.concept_id_1 <> r.concept_id_2)                  AS origenes_maps_to
+FROM cdm.concept c
+WHERE c.concept_id IN (133228, 320128, 4281516)
+ORDER BY c.concept_id;

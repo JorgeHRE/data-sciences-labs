@@ -151,3 +151,23 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **`LEFT JOIN` a `observation_period`:** un evento de una persona sin periodo debe contar como fuera, no desaparecer del total. Aquí no cambia nada (0 personas sin periodo), pero en una simulación quitando el periodo a 50 personas, el `JOIN` habría dado 0.60 % fuera (el total baja a 100,908) frente al 1.38 % real con `LEFT JOIN` (791 eventos sin periodo).
 - **% fuera = (total − dentro) / total**, no `NOT BETWEEN`, que con un periodo NULL da NULL y no cuenta el evento como fuera.
 - **Causa de los 614 fuera:** desfase de zona horaria de Synthea, verificado en los CSV (ver `reporte_calidad.md`, sección 7). No se corrige (decisión 18).
+
+## 27. Qué tres conceptos explorar en ATHENA (actividad 9)
+- **Opciones:** A) los más usados en las consultas: Dental caries (act. 7), Essential hypertension (control en act. 7, incidencia en act. 8) y Gingivitis (n.º 1 del top 20); B) el top 3 por frecuencia de la act. 6 (Gingivitis, Viral sinusitis, Dental caries).
+- **Elegida A:** el enunciado dice "los que más usaste", y la hipertensión aparece en más análisis que la sinusitis.
+
+## 28. Qué cuenta como "hijo" (actividad 9)
+- **Opciones:** A) hijos directos estándar (`concept_ancestor` a distancia 1), con todos los descendientes en otra columna; B) solo descendientes.
+- **Elegida A:** coincide con lo que ATHENA muestra en *Hierarchy* (solo estándar). La relación `Subsumes` da más (29 y 42 en caries y gingivitis) porque incluye hijos no estándar; ATHENA los lista en *Related concepts*. Los descendientes preparan la sesión 16 (*include descendants*, consulta 7d).
+- **Comparación:** la parte SNOMED coincide exactamente con ATHENA (27, 8, 35); la diferencia (28, 8, 37) son hijos de OMOP Extension y SNOMED Veterinary, vocabularios que no se descargaron (0 conceptos en la base).
+
+## 29. Causa de los 27 códigos de `conditions` sin destino (actividad 9, cierra pendiente de la act. 5)
+- **Verificación en ATHENA (web; la API devuelve 403 a clientes automáticos):** `4208104` *Drug overdose* abre por URL directa, figura como **Deprecated** y relacionado con *Overdose* `607147`; los conceptos retirados no salen en la búsqueda. `D7140` y `D0120` no aparecen.
+- **Desglose medido en la base (4,465 filas, la causa B de `conditions`):**
+  - 4 SNOMED **retirados** (`D`), 1,771 filas: sobredosis (retirado 2021-07-31), dependencia de drogas (2024-10-01), concusión (2026-01-01), *History of single seizure*. Synthea v3.3.0 sigue generando códigos que SNOMED ya retiró.
+  - 1 SNOMED **actualizado** (`U`), 271 filas: *Served in armed forces*.
+  - 15 SNOMED válidos no estándar sin `Maps to`, 2,393 filas: casi todos antecedentes (*History of…*, *H/O:*), más *Refugee* y *Smokes tobacco daily*.
+  - 7 ICD10CM válidos sin `Maps to`, 30 filas: metástasis.
+- **Corrección a la act. 5:** dos de los retirados sí tienen un equivalente estándar vía `Concept poss_eq to` (*Overdose* `607147` y *Substance dependence* `37165431`): **1,230 filas recuperables** con un mapeo propio (`source_to_concept_map`). ETL-Synthea solo sigue `Maps to`. Se documenta, no se corrige (decisión 18).
+- **CDT:** la base no tiene vocabulario CDT ni HCPCS y ATHENA no devuelve `D7140`/`D0120`: consistente con que sean códigos dentales CDT (licencia de la ADA), **no confirmado**.
+- **No verificado:** los 3 códigos de `devices` sin destino (decisión 20) y el resto de los 15 válidos en ATHENA.
