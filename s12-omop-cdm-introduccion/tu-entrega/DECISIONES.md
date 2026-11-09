@@ -171,3 +171,18 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Corrección a la act. 5:** dos de los retirados sí tienen un equivalente estándar vía `Concept poss_eq to` (*Overdose* `607147` y *Substance dependence* `37165431`): **1,230 filas recuperables** con un mapeo propio (`source_to_concept_map`). ETL-Synthea solo sigue `Maps to`. Se documenta, no se corrige (decisión 18).
 - **CDT:** la base no tiene vocabulario CDT ni HCPCS y ATHENA no devuelve `D7140`/`D0120`: consistente con que sean códigos dentales CDT (licencia de la ADA), **no confirmado**.
 - **No verificado:** los 3 códigos de `devices` sin destino (decisión 20) y el resto de los 15 válidos en ATHENA.
+
+## 30. Periodos huérfanos de GiBleed: consultas idénticas con control (actividad 10)
+- **Hallazgo:** `ref_gibleed.observation_period` tiene 5,343 filas, 2,649 de personas que no existen en `person` (2,694). Además, sus condiciones apuntan a 65,268 visitas, pero `visit_occurrence` solo tiene 1,037 (todas de hospitalización, de 890 personas). Parece un recorte de una población mayor que no se aplicó igual a todas las tablas (inferido del patrón, no verificado).
+- **Opciones:** A) consultas idénticas a la act. 6, con un control que separa los periodos de personas existentes; B) borrar los huérfanos al cargar.
+- **Elegida A:** respeta "las mismas consultas" y deja el defecto a la vista. Mezclar los huérfanos bajaría la mediana de GiBleed de 57.1 a ~19 años en esos periodos. Las visitas no tienen arreglo: su media por persona no es comparable.
+
+## 31. Nombres de concepto desde `cdm.concept` en las tres bases (actividad 10)
+- **Hallazgo:** el `concept` de MIMIC solo trae 3,885 conceptos locales (`mimiciv_*`): ninguna condición ni sexo encuentra nombre ahí. El de GiBleed sí cubre el 100 %.
+- **Opciones:** A) nombres de nuestro `cdm.concept` (vocabulario 2026) en las tres; B) el `concept` de cada base.
+- **Elegida A:** los `concept_id` estándar son universales en OMOP, así que el nombre es el mismo en cualquier base; resuelve el 100 % de sexos y condiciones. **Límite:** 4 tipos de visita de MIMIC (`38004207`, `8870`, `581385`, `8883`) no tienen nombre en ninguna de las dos tablas; nuestra descarga no incluye el vocabulario CMS Place of Service. Se dejan sin nombre.
+
+## 32. Bases de referencia: GiBleed y MIMIC-IV demo (actividad 10)
+- **Opciones:** A) solo GiBleed (Synthea: compara conversión con conversión); B) solo MIMIC-IV demo (100 pacientes reales de UCI); C) ambas; D) Broadsea (plataforma completa, varios GB; su CDM de demostración es Eunomia).
+- **Elegida C:** GiBleed responde "¿nuestra conversión se parece a la de referencia de OHDSI?" y MIMIC "¿en qué difiere Synthea de datos clínicos reales?". Coste pequeño (dos ZIP, 17 MB) y ambas son CDM 5.3, cuyas columnas usadas en la act. 6 no cambian en la 5.4.
+- **Carga:** `referencia/cargar_referencia.sh`, en esquemas `ref_gibleed` y `ref_mimic` sin tocar `cdm`; solo las 5 tablas que usa la act. 6, como texto y tipando las columnas que usan las consultas. Datos fuera de git. Conteos tras la carga = filas de los CSV.

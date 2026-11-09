@@ -486,3 +486,116 @@ SELECT c.concept_id, c.concept_name, c.vocabulary_id, c.domain_id,
 FROM cdm.concept c
 WHERE c.concept_id IN (133228, 320128, 4281516)
 ORDER BY c.concept_id;
+
+-- =====================================================================
+-- Actividad 10. Comparación con dos CDM de referencia (decisiones 30-32)
+-- ref_gibleed: GiBleed 5.3 (Synthea vía ETL-Synthea, 2019, recortado).
+-- ref_mimic:   MIMIC-IV demo 5.3 (100 pacientes reales de UCI, fechas
+--              desplazadas a los 2100 para anonimizar).
+-- Carga: referencia/cargar_referencia.sh. Son las consultas de la act. 6,
+-- pero con una columna `base` y las tres bases apiladas con UNION ALL, para
+-- obtener la tabla comparativa de una vez. Los nombres salen siempre de
+-- cdm.concept (decisión 31): el concept de MIMIC solo trae conceptos locales.
+-- =====================================================================
+-- 10a Personas, sexo y año de nacimiento
+WITH personas AS (
+    SELECT 'lab' AS base, person_id, gender_concept_id, year_of_birth FROM cdm.person
+    UNION ALL
+    SELECT 'gibleed', person_id, gender_concept_id, year_of_birth FROM ref_gibleed.person
+    UNION ALL
+    SELECT 'mimic', person_id, gender_concept_id, year_of_birth FROM ref_mimic.person)
+SELECT p.base,
+       count(*)                                                     AS personas,
+       count(DISTINCT p.person_id)                                  AS personas_distintas,
+       round(100.0 * count(*) FILTER (WHERE c.concept_name = 'FEMALE') / count(*), 1) AS pct_mujeres,
+       count(*) FILTER (WHERE c.concept_id IS NULL)                 AS sexo_sin_nombre,
+       min(p.year_of_birth)                                         AS nac_min,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY p.year_of_birth) AS nac_mediana,
+       max(p.year_of_birth)                                         AS nac_max
+FROM personas p
+LEFT JOIN cdm.concept c ON c.concept_id = p.gender_concept_id
+GROUP BY p.base
+ORDER BY personas DESC;
+
+-- 10b Días de observación por periodo (como 6.2). En GiBleed hay 2,649
+-- periodos de personas que no existen en person (decisión 30): se muestran
+-- las dos versiones, todos los periodos y solo los de personas existentes.
+WITH periodos AS (
+    SELECT 'lab' AS base, op.person_id, observation_period_end_date - observation_period_start_date AS dias,
+           EXISTS (SELECT 1 FROM cdm.person p WHERE p.person_id = op.person_id) AS persona_existe
+      FROM cdm.observation_period op
+    UNION ALL
+    SELECT 'gibleed', op.person_id, observation_period_end_date - observation_period_start_date,
+           EXISTS (SELECT 1 FROM ref_gibleed.person p WHERE p.person_id = op.person_id)
+      FROM ref_gibleed.observation_period op
+    UNION ALL
+    SELECT 'mimic', op.person_id, observation_period_end_date - observation_period_start_date,
+           EXISTS (SELECT 1 FROM ref_mimic.person p WHERE p.person_id = op.person_id)
+      FROM ref_mimic.observation_period op)
+SELECT base,
+       CASE WHEN persona_existe THEN 'persona existe' ELSE 'huérfano' END AS periodo,
+       count(*)                                                    AS periodos,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY dias)           AS mediana_dias,
+       round((percentile_cont(0.5) WITHIN GROUP (ORDER BY dias) / 365.25)::numeric, 1) AS mediana_anios,
+       percentile_cont(0.25) WITHIN GROUP (ORDER BY dias)          AS p25_dias,
+       percentile_cont(0.75) WITHIN GROUP (ORDER BY dias)          AS p75_dias,
+       count(*) FILTER (WHERE dias = 0)                            AS con_cero_dias
+FROM periodos
+GROUP BY base, persona_existe
+ORDER BY base, periodo DESC;
+
+-- 10c Top 20 de diagnósticos por base (como 6.3: personas distintas por
+-- concepto estándar, % sobre toda la población de esa base). row_number()
+-- numera dentro de cada base (PARTITION BY) y se filtra después: el filtro
+-- sobre una ventana necesita una subconsulta porque WHERE se evalúa antes.
+WITH cond AS (
+    SELECT 'lab' AS base, person_id, condition_concept_id FROM cdm.condition_occurrence
+    UNION ALL SELECT 'gibleed', person_id, condition_concept_id FROM ref_gibleed.condition_occurrence
+    UNION ALL SELECT 'mimic',   person_id, condition_concept_id FROM ref_mimic.condition_occurrence),
+pob AS (
+    SELECT 'lab' AS base, count(*) AS n FROM cdm.person
+    UNION ALL SELECT 'gibleed', count(*) FROM ref_gibleed.person
+    UNION ALL SELECT 'mimic',   count(*) FROM ref_mimic.person),
+ranking AS (
+    SELECT c.base, c.condition_concept_id,
+           count(DISTINCT c.person_id) AS personas, count(*) AS registros,
+           row_number() OVER (PARTITION BY c.base
+                              ORDER BY count(DISTINCT c.person_id) DESC, count(*) DESC) AS puesto
+    FROM cond c
+    GROUP BY c.base, c.condition_concept_id)
+SELECT r.base, r.puesto, k.concept_name AS diagnostico, r.personas,
+       round(100.0 * r.personas / p.n, 1) AS pct_poblacion, r.registros
+FROM ranking r
+JOIN pob p ON p.base = r.base
+LEFT JOIN cdm.concept k ON k.concept_id = r.condition_concept_id
+WHERE r.puesto <= 20
+ORDER BY r.base, r.puesto;
+
+-- 10d Visitas por persona y por tipo (como 6.4): rejilla persona × tipo de
+-- su propia base con LEFT JOIN, para que los ceros cuenten; denominador =
+-- todas las personas de la base. Se cuenta visit_occurrence_id, no filas.
+WITH personas AS (
+    SELECT 'lab' AS base, person_id FROM cdm.person
+    UNION ALL SELECT 'gibleed', person_id FROM ref_gibleed.person
+    UNION ALL SELECT 'mimic',   person_id FROM ref_mimic.person),
+visitas AS (
+    SELECT 'lab' AS base, person_id, visit_concept_id, visit_occurrence_id FROM cdm.visit_occurrence
+    UNION ALL SELECT 'gibleed', person_id, visit_concept_id, visit_occurrence_id FROM ref_gibleed.visit_occurrence
+    UNION ALL SELECT 'mimic',   person_id, visit_concept_id, visit_occurrence_id FROM ref_mimic.visit_occurrence),
+tipos AS (SELECT DISTINCT base, visit_concept_id FROM visitas),
+rejilla AS (
+    SELECT p.base, p.person_id, t.visit_concept_id, count(v.visit_occurrence_id) AS n
+    FROM personas p
+    JOIN tipos t ON t.base = p.base
+    LEFT JOIN visitas v ON v.base = p.base AND v.person_id = p.person_id
+                       AND v.visit_concept_id = t.visit_concept_id
+    GROUP BY p.base, p.person_id, t.visit_concept_id)
+SELECT r.base, coalesce(k.concept_name, r.visit_concept_id::text) AS tipo_visita,
+       count(*) AS personas_denominador, sum(r.n) AS visitas,
+       round(avg(r.n), 2) AS media_por_persona,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY r.n) AS mediana,
+       count(*) FILTER (WHERE r.n = 0) AS personas_con_cero
+FROM rejilla r
+LEFT JOIN cdm.concept k ON k.concept_id = r.visit_concept_id
+GROUP BY r.base, k.concept_name, r.visit_concept_id
+ORDER BY r.base, visitas DESC;
