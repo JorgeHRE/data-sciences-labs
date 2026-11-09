@@ -56,7 +56,7 @@ Cada cifra cuadra con el CDM: filas escritas (más las duplicadas por multi-mape
 
 Dentro de B hay dos subcausas:
 
-- **Sin `Maps to` en la descarga.** Los 27 códigos de `conditions` y los 3 de `devices` existen en `concept`, no son estándar y no tienen `Maps to`, `Concept replaced by` ni reemplazo equivalente. Incluyen sobredosis de drogas (907 filas), dependencia de drogas (323), concusión (314) y metástasis (43).
+- **Sin `Maps to` en la descarga.** Los 27 códigos de `conditions` y los 3 de `devices` existen en `concept`, no son estándar y no tienen `Maps to` ni `Concept replaced by`. Incluyen sobredosis de drogas (907 filas), dependencia de drogas (323), concusión (314) y metástasis (43). *Actualizado en la act. 9 (sección 8):* 5 son códigos SNOMED retirados y 2 de ellos tienen un equivalente estándar vía `Concept poss_eq to` (1,230 filas recuperables).
 - **Vocabulario ausente.** 442 códigos de `procedures` con forma `D0120`, `D7140`… (63,383 filas) no existen en `concept`, y la base no tiene ningún vocabulario CDT. Por su descripción parecen códigos dentales CDT; **esto es inferido, no confirmado**.
 
 ### Ruido frente a pérdida clínica
@@ -80,7 +80,7 @@ Solo se documentan; **no se corrige el ETL ni se vuelve a correr** (~43 min, y E
 
 - **Cuadratura aritmética, no fila a fila.** Los conteos coinciden; no se comparó la identidad de cada fila. Donde fue posible, se usó un control que podía fallar (códigos sin solapes entre fuentes, `*_source_value` contra los códigos de origen).
 - **Cobertura.** `careplans` (20,770), `imaging_studies` (658,769) y `supplies` (58,104) no se miden: ningún INSERT del ETL las lee, y `claims` solo alimenta `cost`, que está vacía (decisión 9).
-- **Sin confirmar en ATHENA** (actividad 9): si los `Maps to` ausentes faltan solo en esta descarga o también en el vocabulario oficial, y si los códigos `D####` son CDT.
+- **ATHENA** (actividad 9, sección 8): confirmado que los códigos de sobredosis están retirados también en el vocabulario oficial; que `D####` sean CDT sigue sin confirmar (ATHENA no los devuelve).
 - **Clasificación por mapa.** Para decidir el destino de cada código se usó `source_to_standard_vocab_map`. En `immunizations` el mapa por sí solo no predecía la pérdida, que se detectó al cuadrar contra el CDM. La cuadratura contra el CDM es la medición de referencia.
 
 ## 5. Actividad 6: descripción de la población
@@ -185,3 +185,39 @@ Consultas en `consultas_omop.sql`, partes 8a-8b. Decisión 26.
 ### Qué significaría ignorar la ventana en un estudio real
 
 Ignorarla cuenta eventos ocurridos cuando el paciente no estaba siendo observado: mezcla casos previos con incidentes y, en el denominador, suma tiempo en que nada podía registrarse; las tasas salen sesgadas (en este CDM, contar desde el nacimiento en vez de desde el periodo añade un 22 % de personas-año no observadas). Aquí la diferencia es solo del 0.60 % y es un artefacto, porque el periodo se construye con los mismos encuentros que generan los eventos; en datos de aseguradoras, donde la ventana es la afiliación, la brecha suele ser mucho mayor.
+
+## 8. Actividad 9: los tres conceptos más usados, en ATHENA
+
+Consulta local en `consultas_omop.sql`, parte 9; búsqueda en la web de ATHENA (athena.ohdsi.org). Decisiones 27-29.
+
+| | Dental caries | Essential hypertension | Gingivitis |
+|---|---|---|---|
+| **`concept_id`** | 133228 | 320128 | 4281516 |
+| **Vocabulario / dominio / estándar** | SNOMED / Condition / S | SNOMED / Condition / S | SNOMED / Condition / S |
+| **Hijos en ATHENA** | 28 (27 SNOMED + 1 OMOP Extension) | 8 (SNOMED) | 37 (35 SNOMED + 1 OMOP Extension + 1 SNOMED Veterinary) |
+| **Hijos en la base** | 27 | 8 | 35 |
+| **Descendientes en la base** | 101 | 13 | 76 |
+| **Código de origen que mapea a él** | ICD10CM `K02.9` (`35208124`) | ICD10CM `I10` (`35207668`) | SNOMED `196355002` (`40397494`), inactivo |
+| **Vocabularios con `Mapped from` en ATHENA** | ICD10CM, SNOMED y otros | ICD10CM, ICD10, ICD9CM, Read, Nebraska Lexicon, KCD7, CIEL… | SNOMED, Read, Nebraska Lexicon, CIEL, MeSH, OXMIS, HPO; **ningún ICD-10** |
+
+### Lo que muestra la comparación
+
+- **Todo lo que hay en la base coincide con ATHENA:** atributos, hijos SNOMED y los tres mapeos ICD10CM de control. La base es completa **dentro de los vocabularios descargados**.
+- **Las diferencias son vocabularios no descargados:** hijos de OMOP Extension y SNOMED Veterinary (0 conceptos en la base) y la mayoría de los códigos de origen (Read, ICD9CM, CIEL…). No afecta a los conteos de este lab, porque Synthea solo usa SNOMED e ICD-10, pero datos codificados en ICD9CM se descartarían enteros.
+- **La gingivitis genérica no tiene traducción ICD-10**, ni aquí ni en ATHENA: los códigos ICD-10 de gingivitis (`K05.00`, `K05.01`) van al hijo *Acute gingivitis*.
+- **Nomenclatura:** la web muestra el nombre de la relación, no su id: `Mapped from` = "Standard to Non-standard map (OMOP)" y `Maps to` = "Non-standard to Standard map (OMOP)". *Hierarchy* muestra solo hijos estándar; `Subsumes` incluye los no estándar (44 frente a 37 en gingivitis).
+
+### Pendientes de la act. 5 resueltos
+
+Los 27 códigos de `conditions` sin destino (4,465 filas) no son un caso único:
+
+| Tipo | Códigos | Filas | Ejemplos |
+|---|---|---|---|
+| SNOMED **retirado** | 4 | 1,771 | Drug overdose (retirado 2021), Dependent drug abuse (2024), Concussion (2026) |
+| SNOMED actualizado | 1 | 271 | Served in armed forces |
+| SNOMED válido, no estándar, sin `Maps to` | 15 | 2,393 | *History of…* (antecedentes), Refugee, Smokes tobacco daily |
+| ICD10CM válido sin `Maps to` | 7 | 30 | Metástasis |
+
+- **Synthea v3.3.0 genera códigos que SNOMED ya retiró.** En ATHENA, *Drug overdose* figura como **Deprecated** (verificado por URL directa; los conceptos retirados no salen en la búsqueda).
+- **1,230 filas serían recuperables:** sobredosis y dependencia tienen un equivalente estándar vía `Concept poss_eq to` (*Overdose* `607147`, *Substance dependence* `37165431`), pero ETL-Synthea solo sigue `Maps to`. Un ETL de producción lo resolvería con `source_to_concept_map`. Solo se documenta (decisión 18).
+- **`D7140`, `D0120`:** ATHENA no los devuelve y la base no tiene vocabulario CDT: consistente con códigos dentales CDT de licencia restringida, **no confirmado**.
