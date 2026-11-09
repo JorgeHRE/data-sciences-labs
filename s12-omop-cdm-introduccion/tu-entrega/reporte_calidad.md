@@ -82,3 +82,65 @@ Solo se documentan; **no se corrige el ETL ni se vuelve a correr** (~43 min, y E
 - **Cobertura.** `careplans` (20,770), `imaging_studies` (658,769) y `supplies` (58,104) no se miden: ningún INSERT del ETL las lee, y `claims` solo alimenta `cost`, que está vacía (decisión 9).
 - **Sin confirmar en ATHENA** (actividad 9): si los `Maps to` ausentes faltan solo en esta descarga o también en el vocabulario oficial, y si los códigos `D####` son CDT.
 - **Clasificación por mapa.** Para decidir el destino de cada código se usó `source_to_standard_vocab_map`. En `immunizations` el mapa por sí solo no predecía la pérdida, que se detectó al cuadrar contra el CDM. La cuadratura contra el CDM es la medición de referencia.
+
+## 5. Actividad 6: descripción de la población
+
+Consultas en `consultas_omop.sql`, partes 6.1 a 6.4. Decisiones 23 y 24.
+
+### Personas, sexo y nacimiento
+
+- **5,904 personas** (5,000 vivas + 904 fallecidas en Synthea). El JOIN a `concept` no multiplica filas.
+- **Sexo:** 2,967 hombres (50.3 %) y 2,937 mujeres (49.7 %). Sin `gender_concept_id = 0`.
+- **Año de nacimiento:** de 1916 a 2026, sin NULLs. Por década: 1910s 81, 1920s 186, 1930s 122, 1940s 390, 1950s 543, 1960s 781, 1970s 774, 1980s 667, 1990s 630, 2000s 754, 2010s 610, 2020s 366. Las décadas anteriores a 1940 son pequeñas; la hipótesis es que se debe a la mortalidad que simula Synthea (los nacidos entonces sobreviven poco hasta la fecha de simulación), **sin verificar**.
+
+### Tiempo de observación
+
+`observation_period` tiene una fila por persona, del primer al último encuentro (`insert_observation_period.sql`): es el lapso con atención registrada, no la edad ni un periodo de afiliación.
+
+| Mediana | p25 | p75 | Media | Con 0 días |
+|---|---|---|---|---|
+| 11,544.5 días (31.6 años) | 4,695 | 17,790.5 | 11,999 | 8 |
+
+Los 8 periodos de 0 días son recién nacidos de 2026 con un solo encuentro.
+
+### Top 20 de diagnósticos (personas distintas)
+
+| # | Diagnóstico | Personas | % población | Registros |
+|---|---|---|---|---|
+| 1 | Gingivitis | 4,891 | 82.8 | 12,221 |
+| 2 | Viral sinusitis | 3,744 | 63.4 | 5,993 |
+| 3 | Dental caries | 3,297 | 55.8 | 4,721 |
+| 4 | Limited social contact | 3,275 | 55.5 | 7,078 |
+| 5 | Social isolation | 3,238 | 54.8 | 7,004 |
+| 6 | Body mass index 30+ - obesity | 2,819 | 47.7 | 2,819 |
+| 7 | Acute viral pharyngitis | 2,550 | 43.2 | 3,400 |
+| 8 | Acute bronchitis | 2,251 | 38.1 | 2,798 |
+| 9 | Prediabetes | 2,239 | 37.9 | 2,239 |
+| 10 | Anemia | 2,156 | 36.5 | 2,156 |
+| 11 | Essential hypertension | 2,145 | 36.3 | 2,145 |
+| 12 | Tooth eruption disorder | 1,450 | 24.6 | 1,625 |
+| 13 | Chronic pain | 1,446 | 24.5 | 1,446 |
+| 14 | Risk activity involvement | 1,427 | 24.2 | 1,522 |
+| 15 | Chronic sinusitis | 1,225 | 20.7 | 1,227 |
+| 16 | Metabolic syndrome X | 1,121 | 19.0 | 1,121 |
+| 17 | Abnormal findings diagnostic imaging heart+coronary circulat | 1,051 | 17.8 | 1,051 |
+| 17 | Ischemic heart disease | 1,051 | 17.8 | 1,051 |
+| 19 | Chronic low back pain | 1,024 | 17.3 | 1,024 |
+| 20 | Normal pregnancy | 1,023 | 17.3 | 2,384 |
+
+- **No todo es enfermedad.** 12 de los 20 son de clase `Disorder`; los otros 8 son `Clinical Finding`, entre ellos situaciones sociales (*Limited social contact*, *Social isolation*, *Risk activity involvement*) que el vocabulario asigna al dominio Condition, así que el ETL acierta al ponerlas aquí. Filtrar por `Disorder` no es una limpieza neutra: también quitaría *Chronic pain*, *obesity* y *Normal pregnancy*. Una cohorte debe definirse por conceptos (y sus descendientes), no por clase.
+- **Empate en el puesto 17, no es multi-mapeo.** Los dos conceptos cardíacos vienen de códigos SNOMED de origen distintos (274531002 y 414545008); 1,042 personas tienen ambos, siempre en fechas diferentes, y 9 de cada lado tienen solo uno. Probablemente el módulo cardíaco de Synthea registra el hallazgo de imagen y luego el diagnóstico (**sin verificar**).
+- **Sesgo hacia lo dental y lo respiratorio agudo:** refleja los módulos de Synthea, no una población real.
+
+### Visitas por persona (denominador: las 5,904 personas)
+
+| Tipo de visita | Visitas | Media | Mediana | Personas con 0 |
+|---|---|---|---|---|
+| Total | 385,971 | 65.4 | 37 | 0 |
+| Outpatient Visit | 362,386 | 61.4 | 35 | 0 |
+| Emergency Room Visit | 15,954 | 2.7 | 1 | 1,619 |
+| Inpatient Visit | 7,631 | 1.3 | 1 | 2,904 |
+
+- Sin visitas huérfanas ni personas sin visita. La suma por tipo cuadra con `visit_occurrence` (385,971).
+- **Distribución sesgada a la derecha:** media 65.4 frente a mediana 37; pocas personas con muchísimas visitas suben la media. Para describir a la persona típica, la mediana.
+- El 94 % de las visitas son ambulatorias; la mitad de la población (2,904) nunca fue hospitalizada.
