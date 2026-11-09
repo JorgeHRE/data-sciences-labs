@@ -138,3 +138,9 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Elegida A**, la forma habitual de describir una cohorte. B responde otra pregunta («cuántas veces va a urgencias quien va»; 3.7 en vez de 2.7).
 - **Implementación:** se parte de `person`, se cruza con los tipos (`CROSS JOIN`, 17,712 filas) y se hace `LEFT JOIN` a las visitas, para que los ceros existan como filas y entren en la mediana. Se cuenta con `count(v.visit_occurrence_id)`: `count(*)` contaría la fila NULL del `LEFT JOIN` como una visita (urgencias pasaría de 15,954 a 17,573 y nadie tendría 0).
 - **Control:** la suma por tipo da 385,971 = filas de `visit_occurrence`; personas con 0 = 5,904 − personas con visita de ese tipo (1,619 y 2,904).
+
+## 25. Estándar contra origen: Dental caries (actividad 7)
+- **Opciones:** A) Dental caries (dos códigos de origen → un concepto); B) Essential hypertension (mapeo 1:1, mismo número: sirve de control pero no muestra diferencia); C) un código con multi-mapeo (`S02.5XXA`, 98 filas: poco frecuente); D) una condición perdida por falta de mapeo (sobredosis: 0 filas en el CDM, nada que contar por estándar).
+- **Elegida A:** es frecuente (puesto 3 del top 20) y muestra con cifras limpias por qué OMOP cuenta por concepto estándar.
+- **Control contra la fuente:** `native.conditions` tiene 3,498 (`80967001`) y 1,223 (`K02.9`), igual que el CDM; la diferencia entre conteos es de agrupación, no de pérdida.
+- **Ampliación 7d:** se añade el conteo con descendientes vía `concept_ancestor` (5,482 filas, 3,636 personas, 9 conceptos), para separar los dos niveles de agrupación: `Maps to` (lo aplica el ETL) y jerarquía (la aplica quien consulta).

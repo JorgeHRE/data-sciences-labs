@@ -359,3 +359,54 @@ FROM (SELECT * FROM por_persona_tipo UNION ALL SELECT * FROM por_persona) x
 LEFT JOIN cdm.concept c ON c.concept_id = x.visit_concept_id
 GROUP BY c.concept_name
 ORDER BY visitas DESC;
+
+-- =====================================================================
+-- Actividad 7. Estándar contra origen: Dental caries (decisión 25)
+-- Misma condición contada de dos formas. El concepto estándar 133228
+-- (SNOMED) agrupa todos los códigos de origen que tienen 'Maps to' hacia él;
+-- condition_source_value guarda el código tal como venía de Synthea.
+-- =====================================================================
+-- 7a Por concepto estándar (una sola cifra)
+SELECT c.concept_name, count(*) AS filas, count(DISTINCT co.person_id) AS personas
+FROM cdm.condition_occurrence co
+JOIN cdm.concept c ON c.concept_id = co.condition_concept_id
+WHERE co.condition_concept_id = 133228
+GROUP BY c.concept_name;
+
+-- 7b Por código de origen: qué códigos alimentan a 133228 y cuánto aporta
+-- cada uno. Si el estándar suma más que cualquier código suelto, es porque
+-- varios orígenes (SNOMED-CT e ICD-10 en Synthea) mapean al mismo concepto.
+SELECT co.condition_source_value                    AS codigo_origen,
+       src.vocabulary_id                            AS vocabulario_origen,
+       src.concept_name                             AS nombre_origen,
+       count(*)                                     AS filas,
+       count(DISTINCT co.person_id)                 AS personas
+FROM cdm.condition_occurrence co
+LEFT JOIN cdm.concept src ON src.concept_id = co.condition_source_concept_id
+WHERE co.condition_concept_id = 133228
+GROUP BY 1, 2, 3
+ORDER BY filas DESC;
+
+-- 7c Control contra la fuente: ¿se perdió alguna fila de esos códigos?
+-- (el ETL descarta lo que no mapea, act. 5). Si cuadra, la diferencia entre
+-- 7a y 7b es solo de agrupación, no de pérdida.
+SELECT n.code, count(*) AS filas_native,
+       (SELECT count(*) FROM cdm.condition_occurrence co
+         WHERE co.condition_source_value = n.code)   AS filas_cdm
+FROM native.conditions n
+WHERE n.code IN ('80967001', 'K02.9')
+GROUP BY n.code;
+
+-- 7d Ampliación (no la pide el enunciado): toda la caries, padre + descendientes.
+-- 7a solo cuenta filas con condition_concept_id = 133228 exacto; los subtipos
+-- (p. ej. 45757234 'penetrating into dentin') se guardan con su propio ID.
+-- concept_ancestor trae la jerarquía; incluye el par (133228, 133228) con
+-- distancia 0, así que el padre entra sin OR. Equivale a "include
+-- descendants" de un concept set en ATLAS. Esperado: 5,482 filas, 3,636
+-- personas, 9 conceptos (frente a 4,721 / 3,297 / 1 de 7a).
+SELECT count(*)                               AS filas,
+       count(DISTINCT co.person_id)           AS personas,
+       count(DISTINCT co.condition_concept_id) AS conceptos
+FROM cdm.condition_occurrence co
+JOIN cdm.concept_ancestor ca ON ca.descendant_concept_id = co.condition_concept_id
+WHERE ca.ancestor_concept_id = 133228;
