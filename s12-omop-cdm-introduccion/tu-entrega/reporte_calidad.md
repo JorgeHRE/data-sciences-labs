@@ -144,3 +144,22 @@ Los 8 periodos de 0 días son recién nacidos de 2026 con un solo encuentro.
 - Sin visitas huérfanas ni personas sin visita. La suma por tipo cuadra con `visit_occurrence` (385,971).
 - **Distribución sesgada a la derecha:** media 65.4 frente a mediana 37; pocas personas con muchísimas visitas suben la media. Para describir a la persona típica, la mediana.
 - El 94 % de las visitas son ambulatorias; la mitad de la población (2,904) nunca fue hospitalizada.
+
+## 6. Actividad 7: estándar contra origen
+
+Consultas en `consultas_omop.sql`, partes 7a-7d. Decisión 25.
+
+| Forma de contar *Dental caries* | Filas | Personas |
+|---|---|---|
+| Por concepto estándar `133228` | **4,721** | **3,297** |
+| Por origen `80967001` (SNOMED) | 3,498 | 2,581 |
+| Por origen `K02.9` (ICD-10-CM) | 1,223 | 799 |
+| Estándar + descendientes (`concept_ancestor`) | 5,482 | 3,636 |
+
+**No dan el mismo número.** Synthea registra la caries a veces en SNOMED y a veces en ICD-10; ambos códigos tienen `Maps to` hacia el mismo concepto estándar, que los reúne. Contar por un solo código de origen pierde el 26 % (solo SNOMED) o el 74 % (solo ICD-10) de los registros. La fuente cuadra fila a fila con el CDM para ambos códigos: no hay pérdida, solo agrupación.
+
+- **Las filas se suman, las personas no:** 2,581 + 799 = 3,380 > 3,297, porque 83 personas tienen la caries registrada con ambos códigos.
+- **El concepto estándar no incluye a sus hijos.** Los subtipos (por superficie y profundidad, *Arrested dental caries*…) se guardan con su propio ID. Para contar toda la caries hay que expandir con `concept_ancestor`: +761 registros y +339 personas (9 conceptos). Es el "include descendants" de un *concept set* de ATLAS.
+- **Los otros dos mecanismos del enunciado, en este CDM:**
+  - *Un origen → varios estándar:* 7 códigos ICD-10 con multi-mapeo (p. ej. `S02.5XXA`, 98 filas a 2 conceptos); la misma fila de origen cuenta en ambos.
+  - *Códigos sin mapear al 0:* no ocurre. ETL-Synthea **descarta** esas filas en lugar de escribirlas con concepto 0 (sección 2): una condición sin mapeo, como la sobredosis de drogas (907 filas en origen), no aparece en `condition_occurrence` por ninguna de las dos vías.
