@@ -126,3 +126,15 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Desglose:** `other` 69, `hawaiian` 58, `native` 38 = 165 (2.79 % de las personas).
 - **Recuperable:** 96 personas (58 + 38) tenían concepto estándar disponible, 8557 y 8657, ya presentes en la descarga. Las 69 `other` no tienen categoría OMB estándar equivalente (existe 8522 «Other Race», que no aparece como estándar), así que su 0 es defendible.
 - **Efecto:** cualquier análisis estratificado por raza no vería a los pacientes nativo-hawaianos ni indígenas americanos. Consistente con la decisión 18: solo se documenta, no se corrige el ETL.
+
+## 23. Top 20 de diagnósticos: personas por concepto estándar (actividad 6)
+- **Opciones:** A) `condition_occurrence` agrupado por `condition_concept_id` con `count(DISTINCT person_id)`; B) A más un ranking aparte de los hallazgos de `observation`; C) agrupar por conceptos padre con `concept_ancestor`.
+- **Elegida A.** Mide prevalencia (qué parte de la población tiene el diagnóstico), que es la pregunta de la actividad. Contar registros mide carga de atención: con registros, *Normal pregnancy* sube del puesto 20 al 9 (2,384 registros entre 1,023 mujeres) y los diagnósticos que se re-registran en cada visita (gingivitis, 12,221 registros / 4,891 personas) se inflan. B mezcla dominios; C cambia la granularidad y exige elegir un nivel de la jerarquía, decisión que no pide la actividad.
+- **Denominador del %:** las 5,904 personas, no las 5,826 con alguna condición.
+- **Control:** el JOIN a `concept` no cambia filas (101,699 = 101,699) y no hay `condition_concept_id = 0`.
+
+## 24. Visitas por persona: denominador = toda la población (actividad 6)
+- **Opciones:** A) dividir entre las 5,904 personas, con 0 para quien no tiene visitas de un tipo; B) dividir solo entre quienes tienen al menos una visita de ese tipo.
+- **Elegida A**, la forma habitual de describir una cohorte. B responde otra pregunta («cuántas veces va a urgencias quien va»; 3.7 en vez de 2.7).
+- **Implementación:** se parte de `person`, se cruza con los tipos (`CROSS JOIN`, 17,712 filas) y se hace `LEFT JOIN` a las visitas, para que los ceros existan como filas y entren en la mediana. Se cuenta con `count(v.visit_occurrence_id)`: `count(*)` contaría la fila NULL del `LEFT JOIN` como una visita (urgencias pasaría de 15,954 a 17,573 y nadie tendría 0).
+- **Control:** la suma por tipo da 385,971 = filas de `visit_occurrence`; personas con 0 = 5,904 − personas con visita de ese tipo (1,619 y 2,904).
