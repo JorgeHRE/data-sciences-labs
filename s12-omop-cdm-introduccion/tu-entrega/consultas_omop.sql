@@ -410,3 +410,49 @@ SELECT count(*)                               AS filas,
 FROM cdm.condition_occurrence co
 JOIN cdm.concept_ancestor ca ON ca.descendant_concept_id = co.condition_concept_id
 WHERE ca.ancestor_concept_id = 133228;
+
+-- =====================================================================
+-- Actividad 8. Respetar OBSERVATION_PERIOD (decisión 26, opción A)
+-- "Dentro" = condition_start_date BETWEEN inicio AND fin del periodo, regla
+-- estricta de ATLAS y del Data Quality Dashboard. Se usa LEFT JOIN para que
+-- un evento de una persona sin periodo no desaparezca: contaría como fuera.
+-- observation_period tiene 1 fila por persona (act. 6), así que el JOIN no
+-- multiplica filas (control: total = 101,699).
+-- =====================================================================
+-- 8a Sin filtrar, dentro, fuera y % de diferencia
+SELECT count(*)                                                       AS sin_filtrar,
+       count(*) FILTER (WHERE co.condition_start_date
+             BETWEEN op.observation_period_start_date
+                 AND op.observation_period_end_date)                  AS dentro,
+       count(*) FILTER (WHERE co.condition_start_date
+             < op.observation_period_start_date)                      AS antes_del_inicio,
+       count(*) FILTER (WHERE co.condition_start_date
+             > op.observation_period_end_date)                        AS despues_del_fin,
+       count(*) FILTER (WHERE op.person_id IS NULL)                   AS sin_periodo,
+       -- % fuera = (total - dentro) / total. No se usa NOT BETWEEN: con un
+       -- periodo NULL daría NULL y ese evento no contaría como fuera.
+       round(100.0 * (count(*) - count(*) FILTER (WHERE co.condition_start_date
+             BETWEEN op.observation_period_start_date
+                 AND op.observation_period_end_date)) / count(*), 2)  AS pct_fuera
+FROM cdm.condition_occurrence co
+LEFT JOIN cdm.observation_period op ON op.person_id = co.person_id;
+
+-- 8b Diagnóstico de los que quedan fuera: ¿cuántos días antes y en qué
+-- visita? Si todos son 1 día antes y en la primera visita, apunta al
+-- desfase de zona horaria de Synthea (encuentros en UTC, condiciones en
+-- fecha local); la columna tolerancia_1_dia es el control de esa causa.
+SELECT op.observation_period_start_date - co.condition_start_date      AS dias_antes,
+       count(*)                                                       AS filas,
+       count(DISTINCT co.person_id)                                   AS personas,
+       count(*) FILTER (WHERE v.visit_start_date
+                              = op.observation_period_start_date)     AS en_primera_visita,
+       (SELECT count(*) FROM cdm.condition_occurrence c2
+          JOIN cdm.observation_period o2 ON o2.person_id = c2.person_id
+         WHERE c2.condition_start_date BETWEEN o2.observation_period_start_date - 1
+                                           AND o2.observation_period_end_date) AS tolerancia_1_dia
+FROM cdm.condition_occurrence co
+JOIN cdm.observation_period op ON op.person_id = co.person_id
+LEFT JOIN cdm.visit_occurrence v ON v.visit_occurrence_id = co.visit_occurrence_id
+WHERE co.condition_start_date < op.observation_period_start_date
+GROUP BY 1
+ORDER BY 1;

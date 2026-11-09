@@ -163,3 +163,25 @@ Consultas en `consultas_omop.sql`, partes 7a-7d. Decisión 25.
 - **Los otros dos mecanismos del enunciado, en este CDM:**
   - *Un origen → varios estándar:* 7 códigos ICD-10 con multi-mapeo (p. ej. `S02.5XXA`, 98 filas a 2 conceptos); la misma fila de origen cuenta en ambos.
   - *Códigos sin mapear al 0:* no ocurre. ETL-Synthea **descarta** esas filas en lugar de escribirlas con concepto 0 (sección 2): una condición sin mapeo, como la sobredosis de drogas (907 filas en origen), no aparece en `condition_occurrence` por ninguna de las dos vías.
+
+## 7. Actividad 8: eventos dentro de `observation_period`
+
+Consultas en `consultas_omop.sql`, partes 8a-8b. Decisión 26.
+
+| Eventos de `condition_occurrence` | Filas |
+|---|---|
+| Sin filtrar | **101,699** |
+| Dentro de la ventana de observación | **101,085** |
+| Fuera (todos antes del inicio; 0 después del fin, 0 sin periodo) | 614 |
+| **Diferencia** | **0.60 %** |
+
+### Por qué quedan 614 fuera: zona horaria de Synthea
+
+- **Patrón:** las 614 filas (522 personas) empiezan exactamente **1 día** antes del inicio del periodo, y todas pertenecen a la **primera visita** de la persona. Con 1 día de tolerancia entran las 101,699.
+- **Causa, verificada en los CSV originales:** `encounters.csv` guarda fecha y hora en UTC (`2025-05-02T05:37:07Z`) y `conditions.csv` solo una fecha (`2025-05-01`). En la fuente hay 48,798 condiciones fechadas un día antes que su propio encuentro, y **todos** esos encuentros ocurren entre las 00 y las 05 h UTC; las que coinciden en fecha tienen horas de 0 a 23. La fecha de la condición está, por tanto, en hora local, aparentemente de EE. UU. (inferido por el rango horario, **sin confirmar** en la documentación de Synthea).
+- **Por qué cruzan el inicio:** el ETL construye `observation_period` con `min(encounters.start)` (fecha UTC). Si la condición es de la primera visita y esa visita fue de madrugada en UTC, queda un día antes del periodo.
+- **Alcance:** el desfase afecta a las 48,798 condiciones de la fuente (también desplaza su fecha frente a la visita), pero solo cruza la ventana en las 614 de la primera visita. Otras tablas que ETL-Synthea fecha desde columnas de solo fecha podrían tener el mismo efecto; **no se midió**.
+
+### Qué significaría ignorar la ventana en un estudio real
+
+Ignorarla cuenta eventos ocurridos cuando el paciente no estaba siendo observado: mezcla casos previos con incidentes y, en el denominador, suma tiempo en que nada podía registrarse; las tasas salen sesgadas (en este CDM, contar desde el nacimiento en vez de desde el periodo añade un 22 % de personas-año no observadas). Aquí la diferencia es solo del 0.60 % y es un artefacto, porque el periodo se construye con los mismos encuentros que generan los eventos; en datos de aseguradoras, donde la ventana es la afiliación, la brecha suele ser mucho mayor.
