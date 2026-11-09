@@ -103,7 +103,7 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **immunizations:** 86,068 → 78,890; **7,178 filas (8.3 %) perdidas, todas de 3 códigos COVID-19 (CVX 207: 3,133; 208: 3,845; 212: 200), 100 % de cada uno**. Los otros 19 códigos pierden 0 %.
 - **Causa (leída en el código del ETL, no inferida):** el INSERT de vacunas exige `target_vocabulary_id = 'CVX'`; las COVID se mapean de CVX a RxNorm, así que el INNER JOIN las descarta en silencio.
 - **Lección de método:** el mapa solo habría predicho 0 % de pérdida (los 22 códigos tienen destino `Drug` estándar). La pérdida se vio al cuadrar fuente contra CDM. Cuadrar la salida es la comprobación que no depende de suponer qué hace el ETL.
-- **No decidido:** si corregir el ETL (aceptar destinos RxNorm) o solo documentarlo. Afecta a cualquier cohorte de vacunación COVID, que saldría vacía.
+- **Decisión (usuario):** solo documentar, no corregir el ETL (aceptar destinos RxNorm) ni volver a correrlo (43 min, y no es determinista: decisión 11). Aplica a todos los fallos del ETL de este lab. Efecto: cualquier cohorte de vacunación COVID saldría vacía.
 
 ## 19. `procedures`: la mayor pérdida del lab (actividad 5)
 - **Resultado:** de 869,518 filas llegan 701,419 (454,821 a `procedure_occurrence` + 246,598 a `measurement`); **168,099 perdidas (19.3 %)**. Cuadra exacto: ambos destinos coinciden con el CDM, y el control (0 códigos compartidos con `observations`) podía fallar.

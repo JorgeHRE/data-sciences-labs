@@ -230,7 +230,8 @@ LIMIT 12;
 -- concepto; todo lo demás va a 0. Se cruza con la categoría OMB que le correspondería.
 -- =====================================================================
 SELECT p.race_source_value, p.race_concept_id,
-       count(*) AS personas,
+       r0.concept_name AS race_concept_name,   -- 0 = 'No matching concept'
+       count(DISTINCT p.person_id) AS personas,
        CASE p.race_source_value WHEN 'hawaiian' THEN 8557   -- Native Hawaiian or Other Pacific Islander
                                 WHEN 'native'   THEN 8657   -- American Indian or Alaska Native
                                 ELSE NULL END AS concepto_que_le_correspondia,
@@ -238,8 +239,9 @@ SELECT p.race_source_value, p.race_concept_id,
 FROM cdm.person p
 LEFT JOIN cdm.concept c
        ON c.concept_id = CASE p.race_source_value WHEN 'hawaiian' THEN 8557 WHEN 'native' THEN 8657 END
+LEFT JOIN cdm.concept r0 ON r0.concept_id = p.race_concept_id
 WHERE p.race_concept_id = 0
-GROUP BY p.race_source_value, p.race_concept_id, c.concept_name
+GROUP BY p.race_source_value, p.race_concept_id, r0.concept_name, c.concept_name
 ORDER BY personas DESC;
 
 -- =====================================================================
@@ -255,15 +257,16 @@ SELECT (SELECT count(*) FROM cdm.person)                                   AS pe
                ON c.concept_id = p.gender_concept_id)                      AS filas_tras_join;
 
 -- 6.1b Distribución por sexo
-SELECT c.concept_name AS sexo, count(*) AS personas,
-       round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
+SELECT c.concept_name AS sexo, count(DISTINCT p.person_id) AS personas,
+       round(100.0 * count(DISTINCT p.person_id)
+             / sum(count(DISTINCT p.person_id)) OVER (), 1) AS pct
 FROM cdm.person p
 LEFT JOIN cdm.concept c ON c.concept_id = p.gender_concept_id
 GROUP BY c.concept_name
 ORDER BY personas DESC;
 
 -- 6.1c Año de nacimiento (todos los años; abajo se resume por década para leerlo)
-SELECT (year_of_birth / 10) * 10 AS decada, count(*) AS personas,
+SELECT (year_of_birth / 10) * 10 AS decada, count(DISTINCT person_id) AS personas,
        min(year_of_birth) AS desde, max(year_of_birth) AS hasta
 FROM cdm.person
 GROUP BY 1
@@ -277,7 +280,7 @@ ORDER BY 1;
 -- no edad ni afiliación. percentile_cont interpola (con n par la mediana puede
 -- ser x.5); es la mediana estadística usual.
 -- =====================================================================
-SELECT count(*) AS personas,
+SELECT count(DISTINCT person_id) AS personas,   -- = periodos: 1 por persona
        percentile_cont(0.50) WITHIN GROUP (ORDER BY dias) AS mediana_dias,
        round((percentile_cont(0.50) WITHIN GROUP (ORDER BY dias) / 365.25)::numeric, 1) AS mediana_anios,
        percentile_cont(0.25) WITHIN GROUP (ORDER BY dias) AS p25_dias,
@@ -350,11 +353,11 @@ por_persona AS (                -- total de visitas por persona
     SELECT person_id, NULL::int AS visit_concept_id, sum(n) AS n
     FROM por_persona_tipo GROUP BY person_id)
 SELECT coalesce(c.concept_name, 'Total')                        AS tipo_visita,
-       count(*)                                                 AS personas_denominador,
+       count(DISTINCT x.person_id)                              AS personas_denominador,
        sum(x.n)                                                 AS visitas,
        round(avg(x.n), 1)                                       AS media_por_persona,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY x.n)         AS mediana,
-       count(*) FILTER (WHERE x.n = 0)                          AS personas_con_cero
+       count(DISTINCT x.person_id) FILTER (WHERE x.n = 0)       AS personas_con_cero
 FROM (SELECT * FROM por_persona_tipo UNION ALL SELECT * FROM por_persona) x
 LEFT JOIN cdm.concept c ON c.concept_id = x.visit_concept_id
 GROUP BY c.concept_name
@@ -505,9 +508,10 @@ WITH personas AS (
     UNION ALL
     SELECT 'mimic', person_id, gender_concept_id, year_of_birth FROM ref_mimic.person)
 SELECT p.base,
-       count(*)                                                     AS personas,
-       count(DISTINCT p.person_id)                                  AS personas_distintas,
-       round(100.0 * count(*) FILTER (WHERE c.concept_name = 'FEMALE') / count(*), 1) AS pct_mujeres,
+       count(*)                                                     AS filas,   -- control: = personas
+       count(DISTINCT p.person_id)                                  AS personas,
+       round(100.0 * count(DISTINCT p.person_id) FILTER (WHERE c.concept_name = 'FEMALE')
+             / count(DISTINCT p.person_id), 1)                      AS pct_mujeres,
        count(*) FILTER (WHERE c.concept_id IS NULL)                 AS sexo_sin_nombre,
        min(p.year_of_birth)                                         AS nac_min,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY p.year_of_birth) AS nac_mediana,
@@ -553,9 +557,9 @@ WITH cond AS (
     UNION ALL SELECT 'gibleed', person_id, condition_concept_id FROM ref_gibleed.condition_occurrence
     UNION ALL SELECT 'mimic',   person_id, condition_concept_id FROM ref_mimic.condition_occurrence),
 pob AS (
-    SELECT 'lab' AS base, count(*) AS n FROM cdm.person
-    UNION ALL SELECT 'gibleed', count(*) FROM ref_gibleed.person
-    UNION ALL SELECT 'mimic',   count(*) FROM ref_mimic.person),
+    SELECT 'lab' AS base, count(DISTINCT person_id) AS n FROM cdm.person
+    UNION ALL SELECT 'gibleed', count(DISTINCT person_id) FROM ref_gibleed.person
+    UNION ALL SELECT 'mimic',   count(DISTINCT person_id) FROM ref_mimic.person),
 ranking AS (
     SELECT c.base, c.condition_concept_id,
            count(DISTINCT c.person_id) AS personas, count(*) AS registros,
@@ -591,10 +595,10 @@ rejilla AS (
                        AND v.visit_concept_id = t.visit_concept_id
     GROUP BY p.base, p.person_id, t.visit_concept_id)
 SELECT r.base, coalesce(k.concept_name, r.visit_concept_id::text) AS tipo_visita,
-       count(*) AS personas_denominador, sum(r.n) AS visitas,
+       count(DISTINCT r.person_id) AS personas_denominador, sum(r.n) AS visitas,
        round(avg(r.n), 2) AS media_por_persona,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY r.n) AS mediana,
-       count(*) FILTER (WHERE r.n = 0) AS personas_con_cero
+       count(DISTINCT r.person_id) FILTER (WHERE r.n = 0) AS personas_con_cero
 FROM rejilla r
 LEFT JOIN cdm.concept k ON k.concept_id = r.visit_concept_id
 GROUP BY r.base, k.concept_name, r.visit_concept_id
