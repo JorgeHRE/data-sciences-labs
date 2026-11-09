@@ -144,3 +144,10 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Elegida A:** es frecuente (puesto 3 del top 20) y muestra con cifras limpias por qué OMOP cuenta por concepto estándar.
 - **Control contra la fuente:** `native.conditions` tiene 3,498 (`80967001`) y 1,223 (`K02.9`), igual que el CDM; la diferencia entre conteos es de agrupación, no de pérdida.
 - **Ampliación 7d:** se añade el conteo con descendientes vía `concept_ancestor` (5,482 filas, 3,636 personas, 9 conceptos), para separar los dos niveles de agrupación: `Maps to` (lo aplica el ETL) y jerarquía (la aplica quien consulta).
+
+## 26. Qué cuenta como "dentro" de `observation_period` (actividad 8)
+- **Opciones:** A) estricto, `condition_start_date BETWEEN inicio AND fin`; B) tolerancia de 1 día antes del inicio; C) dar ambas cifras.
+- **Elegida A:** es la regla de ATLAS y del Data Quality Dashboard y la que pide el enunciado. B añadiría una regla propia que ninguna herramienta OHDSI aplica y escondería el hallazgo. La tolerancia de 1 día se usa solo como **control de la causa** (8b): con ella entran las 101,699.
+- **`LEFT JOIN` a `observation_period`:** un evento de una persona sin periodo debe contar como fuera, no desaparecer del total. Aquí no cambia nada (0 personas sin periodo), pero en una simulación quitando el periodo a 50 personas, el `JOIN` habría dado 0.60 % fuera (el total baja a 100,908) frente al 1.38 % real con `LEFT JOIN` (791 eventos sin periodo).
+- **% fuera = (total − dentro) / total**, no `NOT BETWEEN`, que con un periodo NULL da NULL y no cuenta el evento como fuera.
+- **Causa de los 614 fuera:** desfase de zona horaria de Synthea, verificado en los CSV (ver `reporte_calidad.md`, sección 7). No se corrige (decisión 18).
