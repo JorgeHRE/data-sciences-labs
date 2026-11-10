@@ -208,3 +208,138 @@ WHERE de.drug_type_concept_id = 32838
   AND ca.ancestor_concept_id = 1308216
 GROUP BY p.concept_name, p.concept_class_id, ca.min_levels_of_separation
 ORDER BY pacientes DESC;
+
+-- =====================================================================
+-- Actividad 4a. Exposiciones de lisinopril listas para construir eras
+-- Decisión 6: replicar las reglas OHDSI "non-stockpile" que usó ETL-Synthea
+-- (insert_drug_era.sql), para que cualquier diferencia con cdm.drug_era sea
+-- de implementación y no de reglas:
+--   * fin = end_date; si fuera NULL → inicio + days_supply; si no → inicio + 1
+--     (aquí end_date nunca es NULL, así que los 0 días se quedan en 0)
+--   * se excluyen days_supply negativos (fin antes que inicio) y concepto 0
+-- Se guarda en results (nunca en cdm) para reutilizarla en 4b y en la act. 5.
+-- =====================================================================
+DROP TABLE IF EXISTS results.lisinopril_exposicion;
+CREATE TABLE results.lisinopril_exposicion AS
+SELECT
+    de.drug_exposure_id,
+    de.person_id,
+    de.drug_exposure_start_date                          AS inicio,
+    COALESCE(de.drug_exposure_end_date,
+             de.drug_exposure_start_date + NULLIF(de.days_supply, 0),
+             de.drug_exposure_start_date + 1)            AS fin,
+    de.days_supply,
+    -- Synthea dejó STOP vacío = tratamiento en curso al exportar; el ETL lo
+    -- convirtió en fin = inicio. Se marca para la actividad 5 (PDC).
+    (de.verbatim_end_date IS NULL)                       AS en_curso
+FROM cdm.drug_exposure de
+JOIN cdm.concept_ancestor ca
+  ON ca.descendant_concept_id = de.drug_concept_id
+ AND ca.ancestor_concept_id   = 1308216                  -- lisinopril
+WHERE de.drug_type_concept_id = 32838                    -- prescripciones (decisión 2)
+  AND de.drug_concept_id <> 0
+  AND COALESCE(de.days_supply, 0) >= 0;                  -- fuera los 83 negativos
+
+-- Control: 42,085 recetas − 83 negativas = 42,002 (= drug_exposure_count de
+-- cdm.drug_era para lisinopril). Duplicados de drug_exposure_id deben ser 0.
+SELECT count(*)                                   AS exposiciones,
+       count(*) - count(DISTINCT drug_exposure_id) AS duplicados,
+       count(DISTINCT person_id)                  AS pacientes,
+       count(*) FILTER (WHERE fin = inicio)       AS cero_dias,
+       count(*) FILTER (WHERE en_curso)           AS en_curso,
+       count(*) FILTER (WHERE fin < inicio)       AS fin_antes_inicio,
+       (SELECT sum(drug_exposure_count) FROM cdm.drug_era
+         WHERE drug_concept_id = 1308216)         AS referencia_cdm
+FROM results.lisinopril_exposicion;
+
+-- =====================================================================
+-- Actividad 4b. Eras de lisinopril con gaps and islands (gap 30 días)
+-- Paso 1: para cada exposición, el fin MÁXIMO de las anteriores del paciente
+--   (no LAG: una receta larga puede cubrir varias cortas que acaban antes).
+-- Paso 2: bandera = 1 si empieza más de 30 días después de ese máximo
+--   (o es la primera) → arranca una era nueva.
+-- Paso 3: suma acumulada de banderas = número de era (la "isla").
+-- Paso 4: agrupar por era. gap_days = días de la era sin cobertura
+--   (longitud − días cubiertos, contando una sola vez los solapes).
+-- Orden lógico: las ventanas (OVER) se evalúan en el SELECT, por eso cada
+-- paso necesita su propia CTE para usar el resultado del anterior.
+-- =====================================================================
+DROP TABLE IF EXISTS results.lisinopril_era;
+CREATE TABLE results.lisinopril_era AS
+WITH paso1 AS (
+    SELECT person_id, inicio, fin,
+           max(fin) OVER (PARTITION BY person_id ORDER BY inicio, fin
+                          ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS fin_max_previo
+    FROM results.lisinopril_exposicion
+), paso2 AS (
+    SELECT *,
+           CASE WHEN fin_max_previo IS NULL OR inicio > fin_max_previo + 30
+                THEN 1 ELSE 0 END                                   AS era_nueva,
+           -- días que esta exposición añade y que no cubría ninguna anterior
+           greatest(0, fin - greatest(inicio, coalesce(fin_max_previo, inicio))) AS dias_nuevos
+    FROM paso1
+), paso3 AS (
+    SELECT *, sum(era_nueva) OVER (PARTITION BY person_id ORDER BY inicio, fin
+                                   ROWS UNBOUNDED PRECEDING)          AS num_era
+    FROM paso2
+)
+SELECT person_id,
+       1308216                          AS drug_concept_id,
+       min(inicio)                      AS drug_era_start_date,
+       max(fin)                         AS drug_era_end_date,
+       count(*)                         AS drug_exposure_count,
+       (max(fin) - min(inicio)) - sum(dias_nuevos) AS gap_days
+FROM paso3
+GROUP BY person_id, num_era;
+
+-- Primera comparación con la referencia (cdm.drug_era, mismo ingrediente)
+SELECT 'propia' AS fuente, count(*) AS eras, count(DISTINCT person_id) AS pacientes,
+       sum(drug_exposure_count) AS exposiciones, sum(gap_days) AS gap_days,
+       count(*) FILTER (WHERE gap_days > 0) AS eras_con_hueco
+FROM results.lisinopril_era
+UNION ALL
+SELECT 'cdm.drug_era', count(*), count(DISTINCT person_id),
+       sum(drug_exposure_count), sum(gap_days),
+       count(*) FILTER (WHERE gap_days > 0)
+FROM cdm.drug_era WHERE drug_concept_id = 1308216;
+
+-- =====================================================================
+-- Actividad 4c. Comparación era por era con cdm.drug_era
+-- Por qué: que los totales coincidan no basta; dos errores pueden
+-- compensarse (una era de más en un paciente y una de menos en otro).
+-- FULL OUTER JOIN conserva las eras que solo existen en UNA de las dos
+-- tablas (con LEFT o INNER JOIN desaparecerían justo las diferencias).
+-- Clave del JOIN: (person_id, fecha de inicio). Un paciente no puede tener
+-- dos eras del mismo ingrediente que empiecen el mismo día, así que el JOIN
+-- es 1 a 1 y no multiplica filas (se verifica abajo).
+-- =====================================================================
+WITH ref AS (
+    SELECT person_id, drug_era_start_date, drug_era_end_date,
+           drug_exposure_count, gap_days
+    FROM cdm.drug_era
+    WHERE drug_concept_id = 1308216
+), cmp AS (
+    SELECT p.person_id AS pid_propia, r.person_id AS pid_ref,
+           p.drug_era_end_date AS fin_propia, r.drug_era_end_date AS fin_ref,
+           p.drug_exposure_count AS n_propia, r.drug_exposure_count AS n_ref,
+           p.gap_days AS gap_propia, r.gap_days AS gap_ref
+    FROM results.lisinopril_era p
+    FULL OUTER JOIN ref r
+      ON r.person_id = p.person_id
+     AND r.drug_era_start_date = p.drug_era_start_date
+)
+SELECT
+    count(*)                                                    AS filas_tras_join,
+    count(*) FILTER (WHERE pid_ref IS NULL)                     AS solo_propia,
+    count(*) FILTER (WHERE pid_propia IS NULL)                  AS solo_referencia,
+    count(*) FILTER (WHERE pid_propia IS NOT NULL AND pid_ref IS NOT NULL
+                       AND fin_propia = fin_ref
+                       AND n_propia = n_ref
+                       AND gap_propia = gap_ref)                AS identicas,
+    count(*) FILTER (WHERE pid_propia IS NOT NULL AND pid_ref IS NOT NULL
+                       AND fin_propia <> fin_ref)               AS mismo_inicio_otro_fin,
+    count(*) FILTER (WHERE pid_propia IS NOT NULL AND pid_ref IS NOT NULL
+                       AND (n_propia <> n_ref OR gap_propia <> gap_ref)) AS otro_conteo_o_gap
+FROM cmp;
+-- Esperado si todo coincide: filas_tras_join = 1,541 = identicas; el resto 0.
+-- Si filas_tras_join > 1,541, hay eras que no casan (aparecen en "solo_...").
