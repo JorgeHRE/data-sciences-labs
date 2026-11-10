@@ -115,3 +115,26 @@ Los pacientes por producto suman 1,585, más que los 1,522 distintos: 63 pacient
 **Lectura.** 1,503 pacientes tienen una sola era y 19 tienen dos (interrumpieron más de 30 días). Duración mediana de la era 9.9 años (p25 7.0, p75 10.2, máximo 11.0): el tratamiento crónico de Synthea es un continuo casi perfecto, sin huecos (`gap_days` = 0 en todas). **116 eras duran 0 días** y las 116 vienen de tratamientos en curso que el ETL convirtió en fin = inicio: no son pacientes con una sola toma, sino pacientes activos cuya última receta perdió su duración.
 
 **Error evitado.** Calcular el hueco contra la receta inmediatamente anterior (`LAG`) en lugar del fin máximo acumulado da 6 huecos de 1-30 días y 31 rupturas → 1,553 eras (12 de más). Son falsos: una receta larga anterior (típicamente de 371 días) seguía cubriendo al paciente. El resultado erróneo es plausible y no da error; se detecta solo al comparar con la referencia.
+
+## 5. Adherencia: PDC a un año (lisinopril)
+
+**Diseño (decisión 7):** índice = primera receta de lisinopril (usuario nuevo); ventana de 365 días [índice, índice + 364]; se exige `observation_period` hasta el fin de la ventana (1,522 → **1,461 pacientes**; 61 excluidos por seguimiento corto); cada día cuenta una vez (sin *stockpiling*); recetas «en curso» extendidas hasta el fin de observación (principal) o con 0 días como dejó el ETL (sensibilidad). Controles: 365 días por paciente en todos, PDC ∈ [0, 1], principal ≥ sensibilidad en todos.
+
+| Medida | Media | Mediana | = 0 | 0-0.5 | 0.5-0.8 | ≥ 0.8 | % adherentes (≥ 0.8) | > 1 |
+|---|---|---|---|---|---|---|---|---|
+| **PDC principal** (en curso extendido) | 1.000 | 1.000 | 0 | 0 | 0 | 1,461 | **100.0 %** | 0 |
+| PDC sensibilidad (reglas del ETL) | 0.954 | 1.000 | 65 | 2 | 2 | 1,392 | 95.3 % | 0 |
+| MPR (contraste) | 1.060 | 1.016 | 65 | 2 | 2 | 1,392 | 95.3 % | **1,390** |
+
+**Supuestos que hubo que hacer:**
+1. Las prescripciones equivalen a fármaco disponible (no hay dispensaciones): el PDC mide **cobertura de recetas**, no surtido ni toma (sección 1).
+2. Una receta sin fecha de fin en Synthea (en curso al exportar) cubre hasta el fin de la observación. Este único supuesto mueve el porcentaje de adherentes de 95.3 % a 100 % y elimina 65 PDC = 0 que eran pacientes en tratamiento.
+
+**PDC vs MPR — se usó PDC.** El MPR suma los `days_supply` de las recetas del periodo y divide por los días del periodo: los solapes cuentan dos veces y una receta que se sale de la ventana cuenta entera, así que puede superar 1 y sobreestima la adherencia. Aquí 1,390 de 1,461 pacientes tienen MPR > 1 (típicamente 1.016 = 371/365, una sola receta de 371 días; máximo 2.014). El PDC cuenta días distintos cubiertos, está acotado en [0, 1] y es la medida que usa la Pharmacy Quality Alliance en sus indicadores de adherencia, con umbral 0.8 para la mayoría de las clases (incluidos los antagonistas del sistema renina-angiotensina, grupo del lisinopril). La revisión de Andrade et al. documenta que el MPR y medidas afines eran las más usadas en bases automatizadas, y que las definiciones varían mucho entre estudios.
+
+**Lectura: el resultado no es un hallazgo clínico.** Un PDC de 1.0 en el 100 % de los pacientes es un artefacto del encadenamiento de recetas de Synthea (actividad 4). En datos reales, un metaanálisis de 26 estudios encontró que solo el **48.5 %** (IC 95 % 47.7-49.2 %) de los pacientes era adherente a antihipertensivos al año, con un rango de 20 % a 88 % entre estudios, y 62.2 % en los estudios que usaron PDC (Lemstra y Alsabbagh, 2014). Esta base sirve para **practicar el cálculo** del PDC, no para estimar adherencia.
+
+**Fuentes:**
+- Lemstra M, Alsabbagh MW. *Proportion and risk indicators of nonadherence to antihypertensive therapy: a meta-analysis.* Patient Prefer Adherence. 2014;8:211-218. doi:10.2147/PPA.S55382
+- Andrade SE, Kahler KH, Frech F, Chan KA. *Methods for evaluation of medication adherence and persistence using automated databases.* Pharmacoepidemiol Drug Saf. 2006;15(8):565-574. doi:10.1002/pds.1230
+- Pharmacy Quality Alliance. *PQA Measures Overview* (medidas de adherencia basadas en PDC). https://www.pqa.org/assets/Measures/PQA_Measures_Overview.pdf (consultado el 2026-11-10)
