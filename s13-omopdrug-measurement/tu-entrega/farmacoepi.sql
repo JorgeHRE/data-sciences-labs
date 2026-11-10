@@ -343,3 +343,123 @@ SELECT
 FROM cmp;
 -- Esperado si todo coincide: filas_tras_join = 1,541 = identicas; el resto 0.
 -- Si filas_tras_join > 1,541, hay eras que no casan (aparecen en "solo_...").
+
+-- =====================================================================
+-- Actividad 5a. Cohorte para el PDC de lisinopril (decisión 7)
+-- Índice = primera receta (diseño de usuario nuevo). Se exige que el
+-- observation_period que contiene el índice dure 365 días más (índice + 364).
+-- Se guarda el fin de observación porque la decisión 7.3 extiende hasta ahí
+-- las recetas "en curso".
+-- =====================================================================
+DROP TABLE IF EXISTS results.lisinopril_pdc_cohorte;
+CREATE TABLE results.lisinopril_pdc_cohorte AS
+WITH indice AS (
+    SELECT person_id, min(inicio) AS fecha_indice
+    FROM results.lisinopril_exposicion
+    GROUP BY person_id
+)
+SELECT i.person_id,
+       i.fecha_indice,
+       i.fecha_indice + 364                  AS fin_ventana,
+       op.observation_period_end_date        AS fin_observacion,
+       (op.observation_period_end_date >= i.fecha_indice + 364) AS seguimiento_1_anio
+FROM indice i
+-- El índice cae dentro de un observation_period; cada persona tiene uno solo
+-- (5,904 periodos para 5,904 personas), así que el JOIN no multiplica filas.
+JOIN cdm.observation_period op
+  ON op.person_id = i.person_id
+ AND i.fecha_indice BETWEEN op.observation_period_start_date
+                        AND op.observation_period_end_date;
+
+-- Control: 1,522 pacientes antes del JOIN y después; cuántos quedan.
+SELECT count(*)                                      AS pacientes,
+       count(*) - count(DISTINCT person_id)          AS duplicados,
+       count(*) FILTER (WHERE seguimiento_1_anio)     AS con_1_anio,
+       count(*) FILTER (WHERE NOT seguimiento_1_anio) AS excluidos_seguimiento_corto
+FROM results.lisinopril_pdc_cohorte;
+
+-- =====================================================================
+-- Actividad 5b. PDC a un año por paciente (principal y sensibilidad)
+-- Concepto: generate_series(inicio, fin, '1 day') devuelve una fila por día.
+-- Se cruza cada día de la ventana con las recetas que lo cubren; un día
+-- cubierto por dos recetas sigue contando UNA vez (bool_or) → sin
+-- stockpiling (decisión 7.4) y PDC ≤ 1 por construcción.
+-- Cobertura de una receta: días [inicio, fin), es decir fin − inicio días.
+--   principal (7.3): receta en curso cubre hasta fin_observacion (inclusive)
+--   sensibilidad   : reglas del ETL, receta en curso cubre 0 días
+-- =====================================================================
+DROP TABLE IF EXISTS results.lisinopril_pdc;
+CREATE TABLE results.lisinopril_pdc AS
+WITH dias AS (
+    SELECT c.person_id, c.fin_observacion, d::date AS dia
+    FROM results.lisinopril_pdc_cohorte c
+    CROSS JOIN LATERAL generate_series(c.fecha_indice, c.fin_ventana,
+                                       interval '1 day') AS d
+    WHERE c.seguimiento_1_anio                        -- decisión 7.2
+), cobertura AS (
+    SELECT d.person_id, d.dia,
+           -- LEFT JOIN: los días sin ninguna receta se conservan (x = NULL);
+           -- bool_or de NULLs es NULL → coalesce a false (día no cubierto).
+           coalesce(bool_or(d.dia >= x.inicio AND d.dia < CASE WHEN x.en_curso
+                                 THEN d.fin_observacion + 1 ELSE x.fin END), false) AS cubierto_principal,
+           coalesce(bool_or(d.dia >= x.inicio AND d.dia < x.fin), false)            AS cubierto_sensibilidad
+    FROM dias d
+    LEFT JOIN results.lisinopril_exposicion x
+      ON x.person_id = d.person_id
+     AND x.inicio <= d.dia                            -- solo recetas ya iniciadas
+    GROUP BY d.person_id, d.dia
+)
+SELECT person_id,
+       count(*)                                        AS dias_ventana,
+       count(*) FILTER (WHERE cubierto_principal)      AS dias_cubiertos,
+       round(avg(cubierto_principal::int), 4)          AS pdc,
+       round(avg(cubierto_sensibilidad::int), 4)       AS pdc_sensibilidad
+FROM cobertura
+GROUP BY person_id;
+
+-- Controles: 1,461 pacientes; todos con 365 días; PDC dentro de [0, 1].
+SELECT count(*)                                        AS pacientes,
+       count(*) FILTER (WHERE dias_ventana <> 365)     AS ventana_distinta_365,
+       count(*) FILTER (WHERE pdc NOT BETWEEN 0 AND 1
+                           OR pdc_sensibilidad NOT BETWEEN 0 AND 1) AS fuera_de_rango,
+       count(*) FILTER (WHERE pdc < pdc_sensibilidad)  AS principal_menor_que_sens
+FROM results.lisinopril_pdc;
+
+-- =====================================================================
+-- Actividad 5c. Distribución del PDC, % adherentes y contraste con MPR
+-- MPR (medication possession ratio) = suma de days_supply de las recetas
+-- que EMPIEZAN en la ventana / 365. Suma recetas, no días: los solapes se
+-- cuentan dos veces y una receta larga cuenta entera aunque se salga de la
+-- ventana → puede superar 1. El PDC cuenta días distintos → ≤ 1.
+-- Para el MPR se usa days_supply tal como lo dejó el ETL (en curso = 0).
+-- =====================================================================
+WITH mpr AS (
+    SELECT c.person_id,
+           coalesce(sum(x.days_supply), 0) / 365.0 AS mpr
+    FROM results.lisinopril_pdc_cohorte c
+    LEFT JOIN results.lisinopril_exposicion x
+      ON x.person_id = c.person_id
+     AND x.inicio BETWEEN c.fecha_indice AND c.fin_ventana
+    WHERE c.seguimiento_1_anio
+    GROUP BY c.person_id
+), t AS (
+    SELECT p.*, m.mpr FROM results.lisinopril_pdc p JOIN mpr m USING (person_id)
+)
+SELECT medida,
+       count(*)                                                       AS pacientes,
+       round(avg(v), 3)                                               AS media,
+       round(percentile_cont(0.25) WITHIN GROUP (ORDER BY v)::numeric, 3) AS p25,
+       round(percentile_cont(0.50) WITHIN GROUP (ORDER BY v)::numeric, 3) AS mediana,
+       round(min(v), 3) AS minimo, round(max(v), 3) AS maximo,
+       count(*) FILTER (WHERE v = 0)                                  AS igual_0,
+       count(*) FILTER (WHERE v > 0 AND v < 0.5)                      AS de_0_a_05,
+       count(*) FILTER (WHERE v >= 0.5 AND v < 0.8)                   AS de_05_a_08,
+       count(*) FILTER (WHERE v >= 0.8)                               AS mayor_igual_08,
+       round(100.0 * avg((v >= 0.8)::int), 1)                         AS pct_adherentes,
+       count(*) FILTER (WHERE v > 1)                                  AS mayor_que_1
+FROM t
+CROSS JOIN LATERAL (VALUES ('1. PDC principal (en curso extendido)', pdc),
+                           ('2. PDC sensibilidad (reglas ETL)',      pdc_sensibilidad),
+                           ('3. MPR (contraste)',                    mpr)) AS m(medida, v)
+GROUP BY medida
+ORDER BY medida;
