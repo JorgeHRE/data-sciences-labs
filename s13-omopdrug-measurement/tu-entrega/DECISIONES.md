@@ -21,3 +21,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** distribución cruda + tabla de banderas excluyentes (negativos, ceros, pila en 371, >365); no se limpia en la actividad 2.
 - **Alternativas:** mostrarla ya limpia (descartada: esconde los problemas en el paso de diagnóstico) o imputar ceros y negativos (descartada: inventa datos sobre una columna que ni siquiera es original, pues es fin − inicio en el 100 % de las filas).
 - **Por qué:** primero se diagnostica y después se limpia, en la actividad donde cada regla cambia un resultado medible (eras y PDC, actividades 4-5).
+
+## 5. Ingrediente de estudio (actividades 3-5)
+- **Decisión:** lisinopril (`1308216`): 1,522 pacientes, 27.7 recetas por paciente, 9 productos en los datos (6 dosis de comprimido simple y 3 combinaciones con hidroclorotiazida que suman 15 pacientes).
+- **Alternativas:** amlodipino (descartado: el 99.7 % de sus recetas es un solo producto, la jerarquía casi no se ve), hidroclorotiazida (descartada: muchas combinaciones que en la act. 4 generan solapes entre productos) y acetaminofén (descartado: uso agudo a demanda, el PDC no tiene sentido clínico).
+- **Por qué:** es frecuente, crónico y tiene una jerarquía variada sin exceso de combinaciones; sirve igual para la búsqueda por ingrediente, las eras y el PDC, y `cdm.drug_era` trae su referencia (1,541 eras).
