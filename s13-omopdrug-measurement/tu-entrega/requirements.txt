@@ -1,0 +1,8 @@
+# Lab 13 — entorno del notebook (consultas a Postgres del lab 12 + figuras)
+pandas
+jupysql
+sqlalchemy
+psycopg2-binary
+matplotlib
+jupyter
+python-dotenv
