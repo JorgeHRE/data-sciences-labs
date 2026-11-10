@@ -166,3 +166,45 @@ LEFT JOIN cdm.concept c ON c.concept_id = de.drug_type_concept_id   -- solo para
 -- ROLLUP añade una fila extra con el total de todos los grupos.
 GROUP BY ROLLUP (drug_type_concept_id)
 ORDER BY grouping(drug_type_concept_id), filas DESC;
+
+-- =====================================================================
+-- Actividad 3. Buscar por ingrediente, no por producto (lisinopril)
+-- Decisión 5: ingrediente = lisinopril (1308216); se reutiliza en act. 4-5.
+-- Concepto: concept_ancestor guarda TODOS los pares ancestro → descendiente
+-- a cualquier distancia (incluido el propio concepto, con nivel 0). Con un
+-- solo JOIN se obtiene todo lo que "contiene" el ingrediente.
+-- El par (ancestor, descendant) es único, así que filtrar por UN ancestro
+-- no multiplica filas: cada receta aparece como máximo una vez.
+-- =====================================================================
+WITH ing AS (SELECT 1308216 AS id)               -- lisinopril
+SELECT
+    c.concept_name                                          AS ingrediente,
+    -- 1) Búsqueda directa: solo recetas cuyo producto ES el ingrediente
+    (SELECT count(DISTINCT de.person_id)
+       FROM cdm.drug_exposure de
+      WHERE de.drug_type_concept_id = 32838
+        AND de.drug_concept_id = ing.id)                    AS pacientes_exacto,
+    -- 2) Búsqueda jerárquica: el ingrediente y todos sus descendientes
+    (SELECT count(DISTINCT de.person_id)
+       FROM cdm.drug_exposure de
+       JOIN cdm.concept_ancestor ca
+         ON ca.descendant_concept_id = de.drug_concept_id
+      WHERE de.drug_type_concept_id = 32838
+        AND ca.ancestor_concept_id = ing.id)                AS pacientes_con_descendientes
+FROM ing
+JOIN cdm.concept c ON c.concept_id = ing.id;
+
+-- ¿De dónde sale la diferencia? Productos descendientes presentes en los
+-- datos, con su clase y la distancia en la jerarquía.
+SELECT p.concept_name        AS producto,
+       p.concept_class_id    AS clase,
+       ca.min_levels_of_separation AS niveles,
+       count(DISTINCT de.person_id) AS pacientes,
+       count(*)                     AS recetas
+FROM cdm.drug_exposure de
+JOIN cdm.concept_ancestor ca ON ca.descendant_concept_id = de.drug_concept_id
+JOIN cdm.concept p           ON p.concept_id = de.drug_concept_id
+WHERE de.drug_type_concept_id = 32838
+  AND ca.ancestor_concept_id = 1308216
+GROUP BY p.concept_name, p.concept_class_id, ca.min_levels_of_separation
+ORDER BY pacientes DESC;

@@ -73,3 +73,26 @@ Excluir las vacunas (decisión 2) baja el porcentaje de fin = inicio de 46.2 % a
 ### Diagnóstico: ¿sirve esta base para estudiar exposición?
 
 **Sirve para saber quién recibió una receta de qué ingrediente y cuándo empezó:** 0 % de conceptos sin mapear, 0 fechas nulas y una jerarquía completa. **Es débil para medir duración:** la duración no es un dato propio (es fin − inicio), un tercio de las recetas dura cero días, hay 479 duraciones imposibles y el 10.8 % comparte el mismo valor (371). Por eso, todo resultado que dependa de duración (eras, PDC) depende de las reglas de limpieza que se fijen en las actividades 4-5, y se reportará junto con ellas.
+
+## 3. Búsqueda por ingrediente: lisinopril (1308216)
+
+| Búsqueda | Pacientes |
+|---|---|
+| Directa (`drug_concept_id = 1308216`) | **0** |
+| Con descendientes (`concept_ancestor`) | **1,522** |
+
+**Por qué la diferencia es total:** las recetas nunca apuntan al ingrediente, sino a un producto concreto (*Clinical Drug*, 2 niveles por debajo: ingrediente → forma clínica → producto con dosis). La búsqueda directa no encuentra nada; sin `concept_ancestor` el lisinopril «no existiría» en esta base. Lo mismo ocurre con los otros seis candidatos medidos (acetaminofén, amoxicilina, simvastatina, hidroclorotiazida, amlodipino, metoprolol): búsqueda directa = 0 en todos.
+
+| Producto en los datos | Pacientes | Recetas |
+|---|---|---|
+| lisinopril 10 MG Oral Tablet | 1,432 | 41,278 |
+| lisinopril 20 MG Oral Tablet | 97 | 751 |
+| lisinopril 5 MG Oral Tablet | 21 | 21 |
+| lisinopril 40 MG Oral Tablet | 13 | 13 |
+| hydrochlorothiazide 12.5 MG / lisinopril 20 MG Oral Tablet | 11 | 11 |
+| lisinopril 2.5 MG Oral Tablet | 5 | 5 |
+| hydrochlorothiazide 25 MG / lisinopril 20 MG Oral Tablet | 2 | 2 |
+| lisinopril 30 MG Oral Tablet | 2 | 2 |
+| hydrochlorothiazide 12.5 MG / lisinopril 10 MG Oral Tablet | 2 | 2 |
+
+Los pacientes por producto suman 1,585, más que los 1,522 distintos: 63 pacientes aparecen con más de un producto (cambios de dosis o paso a combinación). Por eso el total se cuenta con `DISTINCT` sobre toda la jerarquía y no sumando productos. En el vocabulario, lisinopril tiene 98 descendientes (77 estándar; marcas, formas, grupos de dosis, combinaciones); en los datos solo aparecen 9.
