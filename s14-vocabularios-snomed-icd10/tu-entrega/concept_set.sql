@@ -460,3 +460,40 @@ LEFT JOIN metf m ON m.person_id = c.person_id
 LEFT JOIN insu i ON i.person_id = c.person_id
 LEFT JOIN hba1c h ON h.person_id = c.person_id
 GROUP BY 1 ORDER BY 1;
+
+-- =====================================================================
+-- Actividad 7b. ¿Qué "segunda evidencia" filtraría a los dudosos?
+-- (decisión 10). Cuántos pacientes de cada grupo pasarían tres variantes:
+--   con_insulina: algún antidiabético (incluida insulina) o HbA1c ≥ 6.5
+--   sin_insulina: algún antidiabético NO insulínico o HbA1c ≥ 6.5
+--   solo_hba1c:   HbA1c ≥ 6.5 (evidencia de laboratorio, no de fármaco)
+-- Ojo: un requisito que incluya la metformina es CIRCULAR para una
+-- pregunta sobre el uso de metformina; se mide solo para ver el efecto.
+-- Esperado: A 444 → 444 / 393 / 252 · solo rama 641 → 402 / 1 / 1.
+-- =====================================================================
+WITH c AS (SELECT DISTINCT co.person_id FROM cdm.condition_occurrence co
+           JOIN results.cs_t2dm cs ON cs.concept_id = co.condition_concept_id
+                                  AND cs.version = 'C'),
+a AS (SELECT DISTINCT person_id FROM cdm.condition_occurrence
+      WHERE condition_concept_id = 201826),
+farmaco AS (SELECT DISTINCT de.person_id, i.concept_name ILIKE '%insulin%' AS es_insulina
+            FROM cdm.drug_exposure de
+            JOIN cdm.concept_ancestor x ON x.descendant_concept_id = de.drug_concept_id
+            JOIN cdm.concept i ON i.concept_id = x.ancestor_concept_id
+                              AND i.concept_class_id = 'Ingredient'
+            WHERE i.concept_name ILIKE ANY (ARRAY['%insulin%', 'metformin', 'glipizide',
+                  'glyburide', 'glimepiride', 'sitagliptin', 'liraglutide', 'semaglutide',
+                  'canagliflozin', 'empagliflozin', 'dapagliflozin', 'pioglitazone'])),
+h AS (SELECT DISTINCT person_id FROM cdm.measurement
+      WHERE measurement_concept_id = 3004410 AND value_as_number >= 6.5)
+SELECT CASE WHEN a.person_id IS NOT NULL THEN 'A (tiene 201826)'
+            ELSE 'solo rama 443732' END AS grupo,
+       count(*) AS pacientes,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM farmaco f WHERE f.person_id = c.person_id)
+                           OR EXISTS (SELECT 1 FROM h WHERE h.person_id = c.person_id)) AS con_insulina,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM farmaco f WHERE f.person_id = c.person_id
+                                                              AND NOT f.es_insulina)
+                           OR EXISTS (SELECT 1 FROM h WHERE h.person_id = c.person_id)) AS sin_insulina,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM h WHERE h.person_id = c.person_id)) AS solo_hba1c
+FROM c LEFT JOIN a ON a.person_id = c.person_id
+GROUP BY 1 ORDER BY 1;
