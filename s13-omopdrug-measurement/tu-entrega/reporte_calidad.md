@@ -138,3 +138,48 @@ Los pacientes por producto suman 1,585, más que los 1,522 distintos: 63 pacient
 - Lemstra M, Alsabbagh MW. *Proportion and risk indicators of nonadherence to antihypertensive therapy: a meta-analysis.* Patient Prefer Adherence. 2014;8:211-218. doi:10.2147/PPA.S55382
 - Andrade SE, Kahler KH, Frech F, Chan KA. *Methods for evaluation of medication adherence and persistence using automated databases.* Pharmacoepidemiol Drug Saf. 2006;15(8):565-574. doi:10.1002/pds.1230
 - Pharmacy Quality Alliance. *PQA Measures Overview* (medidas de adherencia basadas en PDC). https://www.pqa.org/assets/Measures/PQA_Measures_Overview.pdf (consultado el 2026-11-10)
+
+## 6. Caracterización de `measurement`
+
+### 6a. Top 15 de analitos
+Los primeros puestos por número de mediciones no coinciden con los primeros por pacientes: *Pain severity* tiene 204,571 mediciones en 5,904 pacientes, mientras que *Weight difference [Mass] --pre and post dialysis* acumula 104,415 mediciones en solo **340 pacientes** (mediciones repetidas en cada sesión de diálisis). El panel metabólico aporta 69,106 mediciones en 2,748 pacientes. Para seleccionar una cohorte importa contar pacientes, no filas.
+
+### 6b. Unidades de la globulina (3027970)
+
+| Unidad | `unit_source_value` | Mediciones | Pacientes | Mín | p05 | Mediana | p95 | Máx |
+|---|---|---|---|---|---|---|---|---|
+| g/L (8636) | g/L | 20,412 | 998 | 2.0 | 2.1 | 2.8 | 3.4 | 3.5 |
+| g/dL (8713) | g/dL | 16 | 16 | 2.0 | 2.0 | 3.1 | 3.9 | 4.0 |
+
+**Hallazgo: unidad mal etiquetada en origen.** La globulina sérica normal está en torno a 2.0-3.5 g/dL, es decir, 20-35 g/L. Las dos unidades tienen valores en la misma escala (2-4), así que las 20,412 filas «en g/L» son en realidad g/dL: una mediana de 2.8 g/L equivaldría a 0.28 g/dL, un valor incompatible con la vida.
+- **Origen:** Synthea, no el ETL. `unit_source_value` ya dice «g/L» y el ETL lo mapeó fielmente al concepto 8636.
+- **Tipo (marco de Kahn, usado por OHDSI DQD):** falla de **plausibilidad**. El valor es imposible para la unidad declarada.
+- **Consecuencia:** una normalización que se fíe de la etiqueta multiplicaría por 10 solo las 16 filas en g/dL y mezclaría dos escalas que hoy son coherentes. La unidad real se decide **por el rango del valor**. Esa regla es válida aquí porque los rangos de g/dL (2-4) y g/L (20-40) no se solapan, y no sirve como método general (actividad 7).
+- No se corrige `cdm.measurement`. La corrección va a una tabla derivada que conserva el valor y la unidad originales.
+
+### 6c. Valores nulos y operador
+
+| Mediciones | Sin `value_as_number` | % | Con valor en texto | Sin ningún valor |
+|---|---|---|---|---|
+| 4,008,280 | 913,931 | 22.8 % | 667,333 | 246,598 |
+
+El 22.8 % **no son datos faltantes**, son dos casos distintos:
+- **667,333 resultados cualitativos** con el valor solo como texto en `value_source_value`: tiras de orina («Urine ketone test = +»), color y aspecto de la orina. En OMOP deberían ir en `value_as_concept_id`, que el ETL de Synthea no llena.
+- **246,598 registros sin ningún valor:** cribados y cuestionarios cuyo concepto es de clase *Procedure* o *Staging / Scales* (cribado de depresión 61,950; PHQ-2 55,677; consumo de sustancias 21,331; violencia doméstica 21,324). Registran que el cribado se hizo, no su resultado.
+
+**`operator_concept_id`: 100 % lleno y 0 % informativo.** Las 4,008,280 filas tienen operador 0 («sin concepto»), y ningún `value_source_value` empieza por `<` o `>`. Medir la completitud con `IS NOT NULL` daría 100 %. La medida correcta es `coalesce(operator_concept_id, 0) <> 0`, que da **0 %**. La misma regla aplica a cualquier columna `*_concept_id` (ejemplo: GFR con `unit_concept_id = 0` en 59,485 filas).
+
+**Valores censurados.** En esta base no hay ninguno, pero en datos reales aparecen (p. ej., «<0.01 ng/mL»). Se pueden sustituir por el límite de detección o por LD/2 (simple, con sesgo) o tratar con modelos para datos censurados (Tobit, supervivencia). En todos los casos hay que **conservar el operador**: sin él, «<0.01» queda como 0.01 y pasa por un valor medido.
+
+## Anexo. Checklist para reutilizar Synthea
+
+Problemas encontrados en este lab que conviene revisar cada vez que se genere una población nueva. Los laboratorios de Synthea salen de módulos JSON escritos a mano (código, unidad y regla para generar el valor), así que un error en un módulo **se repite igual en todos los pacientes**.
+
+- [ ] **Plausibilidad por analito y unidad** (consulta tipo 6b o DQD). Caso real: globulina con 20,412 valores entre 2.0 y 3.5 etiquetados como g/L, que en realidad son g/dL. Es un error de origen: `unit_source_value` ya dice «g/L».
+- [ ] **Fechas de fin de las recetas.** En el CSV de Synthea el fin de una receta coincide con el inicio de la siguiente (recetas encadenadas). Además, el ETL convierte `stop` NULL en 0 días: 17,654 recetas en curso quedan con duración cero (secciones 4 y 5).
+- [ ] **Acumulación en `days_supply` ≈ 371 días** (41,980 filas): es la renovación anual de los tratamientos crónicos, no un dato clínico (sección 2).
+- [ ] **Unidades sin mapear:** el GFR tiene `unit_concept_id = 0` aunque `unit_source_value` trae la unidad.
+- [ ] **Campos que nunca se llenan:** `operator`, `value_as_concept_id` y `range_low`/`range_high`. Algunos valores solo aparecen en `value_source_value` (p. ej., tabaquismo, LOINC 72166-2, en `observation`).
+- [ ] **Datos «demasiado limpios»:** casi una sola unidad por analito y ningún valor censurado (`<`, `>`). Un pipeline que funciona con Synthea no queda validado para datos reales.
+
+**Qué hacer cuando aparece un error de origen:** no corregir las tablas del CDM. Se corrige en una tabla derivada (`results`) conservando el valor y la unidad originales, se documenta la regla y, si procede, se reporta al proyecto (issue en Synthea) o se edita el módulo y se regenera la población dejando constancia de la versión modificada.

@@ -463,3 +463,98 @@ CROSS JOIN LATERAL (VALUES ('1. PDC principal (en curso extendido)', pdc),
                            ('3. MPR (contraste)',                    mpr)) AS m(medida, v)
 GROUP BY medida
 ORDER BY medida;
+
+-- =====================================================================
+-- Actividad 6a. Top 15 de analitos en measurement
+-- Se ordena por número de mediciones y se muestra también pacientes
+-- distintos: un analito puede tener muchas mediciones en pocos pacientes
+-- (mediciones repetidas) y eso cambia su utilidad para una cohorte.
+-- measurement_concept_id es FK a concept (clave primaria) → el JOIN no
+-- multiplica filas. Orden lógico: FROM/JOIN → GROUP BY → SELECT → ORDER BY → LIMIT
+-- =====================================================================
+SELECT m.measurement_concept_id,
+       c.concept_name                                   AS analito,
+       c.vocabulary_id,
+       count(*)                                         AS mediciones,
+       count(DISTINCT m.person_id)                      AS pacientes,
+       round(count(*)::numeric / count(DISTINCT m.person_id), 1) AS mediciones_por_paciente,
+       round(100.0 * avg((m.value_as_number IS NULL)::int), 1)  AS pct_valor_nulo,
+       count(DISTINCT m.unit_concept_id)                AS unidades_distintas
+FROM cdm.measurement m
+JOIN cdm.concept c ON c.concept_id = m.measurement_concept_id
+GROUP BY m.measurement_concept_id, c.concept_name, c.vocabulary_id
+ORDER BY mediciones DESC
+LIMIT 15;
+
+-- =====================================================================
+-- Actividad 6b. Distribución de unidades de un analito: globulina (3027970)
+-- Elegida porque tiene 2 unidades (g/L y g/dL) y sospechamos un error de
+-- etiquetado: la globulina sérica normal es ~2.0-3.5 g/dL = 20-35 g/L.
+-- Si los valores «en g/L» caen en 2-3.5, en realidad son g/dL.
+-- Se muestra unit_source_value (texto original) junto al concepto mapeado
+-- para ver si el error viene del origen o del ETL.
+-- LEFT JOIN a concept: una unidad 0 o sin concepto no debe desaparecer.
+-- =====================================================================
+SELECT m.unit_concept_id,
+       coalesce(u.concept_code, '(sin concepto)')   AS unidad,
+       m.unit_source_value                          AS unidad_origen,
+       count(*)                                     AS mediciones,
+       count(DISTINCT m.person_id)                  AS pacientes,
+       count(m.value_as_number)                     AS con_valor,
+       min(m.value_as_number)                       AS minimo,
+       percentile_cont(0.05) WITHIN GROUP (ORDER BY m.value_as_number) AS p05,
+       percentile_cont(0.50) WITHIN GROUP (ORDER BY m.value_as_number) AS mediana,
+       percentile_cont(0.95) WITHIN GROUP (ORDER BY m.value_as_number) AS p95,
+       max(m.value_as_number)                       AS maximo
+FROM cdm.measurement m
+LEFT JOIN cdm.concept u ON u.concept_id = m.unit_concept_id
+WHERE m.measurement_concept_id = 3027970
+GROUP BY m.unit_concept_id, u.concept_code, m.unit_source_value
+ORDER BY mediciones DESC;
+
+-- =====================================================================
+-- Actividad 6c. Valores nulos y operador en measurement
+-- (1) % de filas sin value_as_number y, de esas, cuántas traen el valor
+--     como texto en value_source_value (resultados cualitativos).
+-- (2) operator_concept_id: distinguir NULL de 0. Un 0 significa «sin
+--     concepto», no «igual»: si todo es 0 o NULL, NO hay forma de saber
+--     desde OMOP si un valor estaba censurado (<, >).
+-- (3) Comprobación cruzada: ¿algún texto de origen empieza con < o >?
+-- =====================================================================
+-- (1) completitud del valor numérico
+SELECT count(*)                                                  AS mediciones,
+       count(*) FILTER (WHERE value_as_number IS NULL)           AS sin_numero,
+       round(100.0 * count(*) FILTER (WHERE value_as_number IS NULL) / count(*), 1) AS pct_sin_numero,
+       count(*) FILTER (WHERE value_as_number IS NULL
+                          AND nullif(trim(value_source_value), '') IS NOT NULL) AS sin_numero_con_texto,
+       count(*) FILTER (WHERE value_as_number IS NULL
+                          AND nullif(trim(value_source_value), '') IS NULL)     AS sin_valor_alguno
+FROM cdm.measurement;
+
+-- (1b) top 10 analitos sin número: ¿qué tipo de resultado son?
+SELECT c.concept_name                         AS analito,
+       count(*)                               AS sin_numero,
+       count(DISTINCT m.value_source_value)   AS textos_distintos,
+       min(m.value_source_value)              AS ejemplo_texto
+FROM cdm.measurement m
+JOIN cdm.concept c ON c.concept_id = m.measurement_concept_id
+WHERE m.value_as_number IS NULL
+GROUP BY c.concept_name
+ORDER BY sin_numero DESC
+LIMIT 10;
+
+-- (2) operador: NULL vs 0 vs concepto real
+SELECT CASE WHEN m.operator_concept_id IS NULL THEN '(NULL)'
+            WHEN m.operator_concept_id = 0     THEN '0 = sin concepto'
+            ELSE o.concept_name END            AS operador,
+       count(*)                                AS mediciones,
+       round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
+FROM cdm.measurement m
+LEFT JOIN cdm.concept o ON o.concept_id = m.operator_concept_id
+GROUP BY 1
+ORDER BY mediciones DESC;
+
+-- (3) signos de censura en el texto de origen
+SELECT count(*) AS textos_con_signo
+FROM cdm.measurement
+WHERE value_source_value ~ '^\s*(<|>|<=|>=)';
