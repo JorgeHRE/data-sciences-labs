@@ -1,0 +1,8 @@
+# Lab 14 — entorno para la gráfica de impacto (consultas a Postgres del lab 12)
+pandas
+jupysql
+sqlalchemy
+psycopg2-binary
+matplotlib
+jupyter
+python-dotenv
