@@ -64,3 +64,38 @@ FROM cdm.condition_occurrence co
 WHERE co.condition_concept_id IN (SELECT descendant_concept_id
                                   FROM cdm.concept_ancestor
                                   WHERE ancestor_concept_id = 201826);
+
+-- =====================================================================
+-- Actividad 2a. Las banderas de la semilla 201826.
+-- Por qué: el concepto tiene que ser estándar ('S'), de dominio Condition
+-- (si no, sus pacientes no están en condition_occurrence) y vigente
+-- (invalid_reason NULL y valid_end_date en el futuro, típico 2099-12-31).
+-- =====================================================================
+SELECT concept_id, concept_name, domain_id, vocabulary_id, concept_class_id,
+       standard_concept, invalid_reason, concept_code,
+       valid_start_date, valid_end_date
+FROM cdm.concept
+WHERE concept_id = 201826;
+
+-- Actividad 2b. Un nivel arriba y un nivel abajo.
+-- min_levels_of_separation = 1 → padre o hijo directo. En SNOMED un
+-- concepto puede tener VARIOS padres: más de una fila no es un error.
+-- Esperado: 1 padre (201820 Diabetes mellitus) y 12 hijos directos.
+SELECT 'padre' AS sentido, c.concept_id, c.concept_name
+FROM cdm.concept_ancestor a
+JOIN cdm.concept c ON c.concept_id = a.ancestor_concept_id
+WHERE a.descendant_concept_id = 201826 AND a.min_levels_of_separation = 1
+UNION ALL
+SELECT 'hijo', c.concept_id, c.concept_name
+FROM cdm.concept_ancestor a
+JOIN cdm.concept c ON c.concept_id = a.descendant_concept_id
+WHERE a.ancestor_concept_id = 201826 AND a.min_levels_of_separation = 1
+ORDER BY sentido DESC, concept_name;
+
+-- Actividad 2c. Número total de descendientes (cualquier distancia).
+-- Se excluye la propia semilla, que es su ancestro a distancia 0.
+-- Esperado: 14 (12 hijos + 2 nietos).
+SELECT count(*) AS descendientes
+FROM cdm.concept_ancestor
+WHERE ancestor_concept_id = 201826
+  AND descendant_concept_id <> 201826;
