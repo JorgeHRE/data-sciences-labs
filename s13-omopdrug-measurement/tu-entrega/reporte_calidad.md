@@ -198,6 +198,53 @@ El 22.8 % **no son datos faltantes**, son dos casos distintos:
 - La distribución es **plana** (~1,350 mediciones por cada valor entero de 21 a 34), no una campana. Parece que Synthea genera el valor de forma uniforme en un rango fijo, así que los datos sirven para practicar la normalización, no para describir la globulina de una población.
 - ~700 filas en 20 g/L quedan por debajo de 22. Se revisan en la sección 8: los rangos de referencia varían entre laboratorios.
 
+## 8. Valores implausibles
+
+### 8a. Criterios (citados) y valores fuera
+
+| Analito | Concepto | Rango plausible | Fuente | Mediciones | Por debajo | Por encima | % fuera | Pacientes |
+|---|---|---|---|---|---|---|---|---|
+| Colesterol total | 3027114 (mg/dL) | 50-500 mg/dL | OHDSI DQD v2.9.1¹ | 34,334 | 2 | 0 | 0.0 % | 2 |
+| Creatinina | 3051825 (mg/dL) | 0.1-5 mg/dL | OHDSI DQD v2.9.1¹ | 69,106 | 0 | 5,227 | 7.6 % | 338 |
+| HbA1c | 3004410 (%) | 3.5-20.0 % | Manual NHANES, sec. 9² | 58,969 | 23,485 | 0 | 39.8 % | 485 |
+
+¹ *OHDSI Data Quality Dashboard* v2.9.1, `inst/csv/OMOP_CDMv5.4_Concept_Level.csv`, columnas `plausibleValueLow/High`, https://github.com/OHDSI/DataQualityDashboard (consultado el 2026-11-11). Los rangos están definidos sobre conceptos SNOMED (creatinina 37392176, colesterol 37393449) y se aplican al concepto LOINC del mismo analito y unidad. La versión actual del DQD solo trae rangos numéricos para estos dos analitos.
+² CDC/NCHS. *Laboratory Procedure Manual: Glycohemoglobin (HbA1c)*, Bio-Rad D-100 HPLC, revisión del 5/12/2023. Sección 9, rango reportable: 3.5 a 20.0 %; fuera de él se informa «< 3.5» / «> 20.0», sin número. Sección 13, referencia: 4-5.6 %. https://wwwn.cdc.gov/nchs/data/nhanes/public/2021/labmethods/GHB-L-MET-D-100-508.pdf
+
+Ninguna fila tiene una unidad distinta de la del criterio y no hay nulos en estos tres analitos.
+
+### 8b. Centinelas y contexto clínico
+
+**Centinelas: 0.** Un centinela es un valor exacto que se repite mucho más que sus vecinos (±0.1). Ningún valor fuera de rango lo cumple. El más repetido de la HbA1c, 3.1 (4,467 veces), tiene vecinos con media 3,512: es una curva suave. La acumulación en 2.3 (732) es el mínimo de la distribución, con razón 1.6 frente a 2.4, y 2.5 tiene más valores (903). Parece el **suelo del generador**, no un código de relleno. Tampoco hay centinelas típicos (−1, 999, 9999…) en todo `measurement` (sección 6c: los 0 son puntuaciones y tiras de orina).
+
+**HbA1c: problema del paciente, no de la medición.** Los 23,485 valores < 3.5 % se concentran en 485 de 2,565 pacientes, con una media de 52 mediciones cada uno frente a 16 en el resto. **276 pacientes tienen todas sus HbA1c < 3.5 %.** No es ruido de captura. Parece que un módulo de Synthea genera la HbA1c con otro modelo para un subgrupo.
+
+**Creatinina > 5 mg/dL según contexto renal** (diálisis 4120120/4146536 o ERC terminal en `condition_occurrence`):
+
+| Contexto | 5-30 mg/dL | > 30 mg/dL | Total |
+|---|---|---|---|
+| Contexto renal **previo** a la medición | 2,608 | 377 | 2,985 |
+| Contexto **solo posterior** | 1,074 | 29 | 1,103 |
+| **Sin** contexto renal | 1,139 | 0 | 1,139 |
+
+El rango del DQD es poblacional y marca como error justo a los pacientes renales, cuyo valor real supera 5 mg/dL. Excluirlos sesgaría cualquier cohorte. El contexto se toma de las otras tablas del mismo `person_id` y **respetando la fecha**: el diagnóstico posterior no justifica una medición anterior, aunque probablemente refleja la progresión previa al diagnóstico. Todos los valores > 30 mg/dL son de pacientes renales, pero siguen siendo extremos incluso para diálisis. Sin un techo fisiológico citado, no se califican de imposibles.
+
+### 8c. Qué se hace con cada grupo
+
+Tabla `results.measurement_plausibilidad` (162,409 filas, una por medición). Conserva `valor_original` y añade `clasificacion` y `valor_analitico`. **No se borra ninguna fila.**
+
+| Grupo | Clasificación | Filas | Acción | `valor_analitico` |
+|---|---|---|---|---|
+| Colesterol < 50 | extremo_cerca_limite | 2 | Marcar | = original |
+| Creatinina > 5, contexto previo | extremo_real_contexto_renal | 2,985 | Marcar | = original |
+| Creatinina > 5, contexto posterior | revisar_contexto_posterior | 1,103 | Marcar | = original |
+| Creatinina > 5, sin contexto | revisar_sin_contexto | 1,139 | Marcar | = original |
+| HbA1c < 3.5 % | implausible_metodo | 23,485 | Marcar + **nulo** | NULL |
+
+**Por qué nulo y no borrar en la HbA1c.** El número es imposible (el método lo informaría como «< 3.5»), pero la fila registra un hecho verdadero: la prueba se pidió ese día. Para la media da igual borrar o anular (5.27 % en los dos casos, frente a **4.37 %** con los valores originales, y 4.6 % frente a 2.7 % de mediciones ≥ 6.5 %). Borrar, en cambio, quitaría 23,485 pruebas de los conteos y haría desaparecer a 276 pacientes que sí se hicieron la prueba.
+
+**Cautela adicional:** las HbA1c entre 3.5 y 3.9 % quedan como «dentro de rango» porque el método sí las reporta, pero están por debajo de la referencia (4-5.6 %). El manual las acompaña de la advertencia de posibles resultados falsamente bajos.
+
 ## Anexo. Checklist para reutilizar Synthea
 
 Problemas encontrados en este lab que conviene revisar cada vez que se genere una población nueva. Los laboratorios de Synthea salen de módulos JSON escritos a mano (código, unidad y regla para generar el valor), así que un error en un módulo **se repite igual en todos los pacientes**.
