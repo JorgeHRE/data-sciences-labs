@@ -6,10 +6,10 @@ Definición de la **diabetes mellitus tipo 2 (T2DM)** con vocabularios estándar
 
 | Archivo | Contenido |
 |---|---|
-| `concept_set.sql` | Todo el lab, por actividad (encabezados `-- Actividad Xy.`), con el porqué en comentarios. Crea la vista `results.cs_t2dm` y la tabla `results.cs_t2dm_exclusiones`; el esquema `cdm` no se modifica. |
+| `concept_set.sql` | Todo el lab, por actividad (encabezados `-- Actividad Xy.`), con el porqué en comentarios. Crea las vistas `results.cs_t2dm` y `results.cs_t2dm_ohdsi957` (bono) y la tabla `results.cs_t2dm_exclusiones`; el esquema `cdm` no se modifica. |
 | `justificacion_concept_set.md` | **Entregable principal**: condición y pregunta, semilla, traducción ICD-10-CM, las tres versiones, impacto en pacientes, revisión manual, tabla de decisiones y discusión de sensibilidad frente a VPP. |
 | `figura_impacto.py` / `.png` | Gráfica de pacientes distintos por versión. Lee la vista en modo solo lectura y comprueba las cifras con `assert`. |
-| `DECISIONES.md` | Las 10 decisiones del lab: qué se eligió, qué alternativas había y por qué. |
+| `DECISIONES.md` | Las 11 decisiones del lab: qué se eligió, qué alternativas había y por qué. |
 | `requirements.txt` | Entorno de la figura (pandas, SQLAlchemy, psycopg2, matplotlib, python-dotenv, jupysql, jupyter). |
 
 ## Cómo reproducirlo
@@ -73,4 +73,4 @@ Los datos son **sintéticos** (Synthea). Las diferencias entre versiones depende
 | La discusión de sensibilidad vs VPP está conectada con la pregunta de investigación | Cumple | Justificación §7, «Sensibilidad y valor predictivo positivo» |
 | El código está versionado con commits descriptivos | Cumple | Un PR por actividad (#81-#88) con títulos `lab14: …` |
 
-**Bono (opcional):** pendiente de decidir (comparación con la OHDSI Phenotype Library y actividad 5 sobre `condition_era`).
+**Bono (opcional):** hecha la comparación con la OHDSI Phenotype Library (cohorte 957): `concept_set.sql` bono a-b, justificación §8 y decisión 11. Los 131 conceptos de C están en la definición de OHDSI, que además incluye la rama 443732; OHDSI añade 134 conceptos (nuestras 3 exclusiones y complicaciones sin tipo) y 111 pacientes. La actividad 5 sobre `condition_era` no se hizo.

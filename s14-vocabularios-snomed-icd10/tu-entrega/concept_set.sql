@@ -497,3 +497,43 @@ SELECT CASE WHEN a.person_id IS NOT NULL THEN 'A (tiene 201826)'
        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM h WHERE h.person_id = c.person_id)) AS solo_hba1c
 FROM c LEFT JOIN a ON a.person_id = c.person_id
 GROUP BY 1 ORDER BY 1;
+
+-- =====================================================================
+-- Bono a. Comparación con la OHDSI Phenotype Library (decisión 11).
+-- Definición de referencia: cohorte 957 «[P] Type 2 diabetes mellitus»,
+-- concept set 4 «[LEGEND HTN] Type 2 Diabetes Mellitus», transcrito de
+-- github.com/OHDSI/PhenotypeLibrary/blob/main/inst/cohorts/957.json
+-- (estado «Pending», 2023-09-20). Todas sus entradas son «+ descendientes».
+-- Es una lista externa citada, no una decisión nuestra pegada a mano.
+-- Se expande igual que nuestra versión C: incluidos con descendientes
+-- menos excluidos con descendientes (NOT EXISTS).
+-- =====================================================================
+CREATE OR REPLACE VIEW results.cs_t2dm_ohdsi957 AS
+WITH items (concept_id, excluido) AS (VALUES
+    (201826, false), (443732, false), (443735, false), (443767, false),
+    (192279, false), (376065, false), (443729, false),
+    (201254, true), (435216, true), (200687, true), (201531, true),
+    (4295011, true), (4225656, true), (4227210, true), (4228112, true),
+    (4224254, true), (37016355, true))
+SELECT DISTINCT ca.descendant_concept_id AS concept_id
+FROM items i
+JOIN cdm.concept_ancestor ca ON ca.ancestor_concept_id = i.concept_id
+WHERE NOT i.excluido
+  AND NOT EXISTS (SELECT 1 FROM items x
+                  JOIN cdm.concept_ancestor xa ON xa.ancestor_concept_id = x.concept_id
+                  WHERE x.excluido
+                    AND xa.descendant_concept_id = ca.descendant_concept_id);
+
+-- Bono b. ¿Qué conceptos están en una definición y no en la otra?
+-- FULL OUTER JOIN: conserva filas de ambos lados; el lado que falta queda
+-- NULL, y así se clasifica cada concepto. Pacientes: contexto.
+SELECT CASE WHEN n.concept_id IS NULL THEN 'solo OHDSI'
+            WHEN o.concept_id IS NULL THEN 'solo nuestra C'
+            ELSE 'ambas' END                         AS donde,
+       count(*)                                      AS conceptos,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM cdm.condition_occurrence co
+                        WHERE co.condition_concept_id = coalesce(n.concept_id, o.concept_id)))
+                                                     AS conceptos_con_pacientes
+FROM (SELECT concept_id FROM results.cs_t2dm WHERE version = 'C') n
+FULL OUTER JOIN results.cs_t2dm_ohdsi957 o ON o.concept_id = n.concept_id
+GROUP BY 1 ORDER BY 1;
