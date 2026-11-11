@@ -36,4 +36,14 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 ## 7. Denominador de la prevalencia (actividad 5)
 - **Decisión:** prevalencia bruta = pacientes distintos con la versión / todas las personas de `cdm.person` (5,904).
 - **Alternativas:** personas con al menos una condición registrada (5,826; descartada: es un denominador sesgado, porque solo cuenta a quien ya tiene algún diagnóstico) o adultos con periodo de observación (la correcta para publicar; se deja para la sesión 17, donde la cohorte tendrá fechas, edad en una fecha índice y ventana de observación).
-- **Por qué:** el objetivo de la actividad es mostrar cuánto cambia el **numerador** según la definición; un denominador simple y fijo lo aísla sin añadir otra decisión. Resultado: A 7.5 %, B 7.5 %, C 18.4 % (C provisional).
+- **Por qué:** el objetivo de la actividad es mostrar cuánto cambia el **numerador** según la definición; un denominador simple y fijo lo aísla sin añadir otra decisión. Resultado: A 7.5 %, B 7.5 %, C 18.4 % (C final tras la actividad 6: 1,085 pacientes, igual que la provisional).
+
+## 8. Qué se revisa a mano y cómo se muestrea (actividad 6)
+- **Decisión:** se revisan los 14 descendientes de B (todos, porque son menos de 20) y una muestra de 20 de los 118 descendientes de la rama 443732, ordenados por `md5(concept_id || 'lab14')`.
+- **Alternativas:** solo los 14 de B (descartada: los 118 de la rama entrarían en C sin que nadie los mirara), revisar los 132 completos (descartada: mucho trabajo manual para conceptos homogéneos; se haría solo si la muestra encontrara algún falso positivo) y `setseed()` + `random()` (descartada: depende del orden de lectura y de la sesión, puede cambiar entre máquinas).
+- **Por qué:** cubre las dos vías por las que se entra en C. El hash da la misma muestra en cualquier máquina; la «semilla» es la sal `'lab14'`.
+
+## 9. Exclusiones de la versión C (actividad 6)
+- **Decisión:** se excluyen `43531010` Pre-existing T2DM in pregnancy, `4129519` Pregnancy and T2DM y `45766052` T2DM in remission, cada uno con sus descendientes. Se mantienen, como inclusiones no obvias, la T2DM tratada con insulina, «Pre-existing T2DM» y la T2DM controlada con dieta.
+- **Alternativas:** excluir también los tres casos no obvios (descartada: la cohorte se quedaría con los casos leves y ya tratados con fármacos orales, y perdería a los candidatos a iniciar metformina) o no excluir nada (descartada: el embarazo cambia el tratamiento a insulina y la remisión no tiene indicación de fármaco).
+- **Por qué:** para la pregunta de utilización de metformina pesa más el VPP; estas tres son las únicas formas de entrar en la cohorte sin enfermedad activa o con un tratamiento distinto por razones ajenas a la conducta que se quiere medir. Falsos positivos: 3 de 14 en B y 0 de 20 en la muestra de la rama. C pasa de 134 a 131 conceptos; los pacientes no cambian (1,085), porque ningún paciente de la base tiene esos conceptos.

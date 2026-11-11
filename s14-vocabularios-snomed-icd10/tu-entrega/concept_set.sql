@@ -275,7 +275,8 @@ WHERE ca.ancestor_concept_id IN (201826, 443732)
                   WHERE xa.descendant_concept_id = ca.descendant_concept_id);
 
 -- Actividad 4b. Conceptos por versión. Esperado (sin exclusiones aún):
--- A 1 · B 15 · C 134. count(DISTINCT) = count(*) confirma 0 duplicados.
+-- A 1 · B 15 · C 134. Si la actividad 6 ya se ejecutó antes (tabla de
+-- exclusiones llena), C sale 131. count(DISTINCT) = count(*) confirma 0 duplicados.
 SELECT version, count(*) AS filas, count(DISTINCT concept_id) AS conceptos
 FROM results.cs_t2dm
 GROUP BY version
@@ -284,7 +285,8 @@ ORDER BY version;
 -- Actividad 4c. Prueba de que la exclusión funciona (control que puede
 -- fallar). Dentro de una transacción que se deshace con ROLLBACK: no deja
 -- nada en la tabla. Si excluimos la rama 443732 entera, C debe caer de
--- 134 a 15 (= B): se quitan 443732 Y sus 118 descendientes.
+-- 134 a 15 (= B): se quitan 443732 Y sus 118 descendientes. Si las
+-- exclusiones de la actividad 6 ya están cargadas, cae de 131 a 12.
 BEGIN;
 INSERT INTO results.cs_t2dm_exclusiones VALUES (443732, 'prueba: se deshace');
 SELECT version, count(*) AS conceptos_con_prueba
@@ -355,3 +357,62 @@ FROM (SELECT cs.version, count(DISTINCT co.person_id) AS pacientes
       GROUP BY cs.version) n
 CROSS JOIN (SELECT count(*) AS poblacion FROM cdm.person) t
 ORDER BY n.version;
+
+-- =====================================================================
+-- Actividad 6a. Conceptos a revisar a mano (decisión 8).
+--   'B': los 14 descendientes de la semilla, TODOS (son menos de 20).
+--   'rama': 20 de los 118 descendientes de 443732, muestra reproducible
+--           ordenando por md5(concept_id || 'lab14'). md5 da un código de
+--           aspecto aleatorio pero siempre igual para la misma entrada:
+--           mismo resultado en cualquier máquina; la sal 'lab14' es la semilla.
+-- Se excluye la raíz de cada rama (distancia 0): se revisan descendientes.
+-- Los pacientes son contexto, no criterio: el veredicto es clínico.
+-- LEFT JOIN a condition_occurrence: un concepto sin pacientes debe salir
+-- con 0, no desaparecer (casi todos tienen 0 en esta base).
+-- =====================================================================
+WITH revisar AS (
+    SELECT 'B' AS origen, descendant_concept_id AS concept_id
+    FROM cdm.concept_ancestor
+    WHERE ancestor_concept_id = 201826 AND descendant_concept_id <> 201826
+    UNION ALL
+    (SELECT 'rama', descendant_concept_id
+     FROM cdm.concept_ancestor
+     WHERE ancestor_concept_id = 443732 AND descendant_concept_id <> 443732
+     ORDER BY md5(descendant_concept_id::text || 'lab14')
+     LIMIT 20)   -- el paréntesis hace que ORDER BY/LIMIT afecten solo a esta parte
+)
+SELECT r.origen, r.concept_id, c.concept_name,
+       count(DISTINCT co.person_id) AS pacientes
+FROM revisar r
+JOIN cdm.concept c ON c.concept_id = r.concept_id
+LEFT JOIN cdm.condition_occurrence co ON co.condition_concept_id = r.concept_id
+GROUP BY r.origen, r.concept_id, c.concept_name
+ORDER BY r.origen, c.concept_name;
+
+-- =====================================================================
+-- Actividad 6b. Exclusiones de la revisión manual (decisión 9).
+-- Resultado de la revisión: 3 falsos positivos de 14 en B y 0 de 20 en
+-- la muestra de la rama. Cada exclusión arrastra a sus descendientes
+-- (lo hace la vista de la actividad 4a).
+-- ON CONFLICT DO NOTHING: si el archivo se ejecuta otra vez, la fila ya
+-- existe (concept_id es PK) y no da error ni la duplica.
+-- =====================================================================
+INSERT INTO results.cs_t2dm_exclusiones (concept_id, motivo) VALUES
+  (43531010, 'Embarazo: T2DM preexistente en el embarazo; se cambia a insulina y contaminaría la medida de uso de metformina'),
+  (4129519,  'Embarazo: embarazo y T2DM; mismo motivo que 43531010'),
+  (45766052, 'Remisión: sin enfermedad activa ni indicación de tratamiento; falso positivo para la pregunta de metformina')
+ON CONFLICT (concept_id) DO NOTHING;
+
+-- Actividad 6c. Efecto de las exclusiones. Esperado: A 1 y B 15 sin
+-- cambios; C baja de 134 a 131 (3 conceptos quitados: 43531010 aparece
+-- dos veces abajo porque también es descendiente de 4129519).
+SELECT version, count(*) AS conceptos
+FROM results.cs_t2dm
+GROUP BY version ORDER BY version;
+
+-- Qué conceptos salieron de C exactamente (exclusión + descendientes).
+SELECT x.concept_id AS excluido, c.concept_id AS quitado, c.concept_name
+FROM results.cs_t2dm_exclusiones x
+JOIN cdm.concept_ancestor xa ON xa.ancestor_concept_id = x.concept_id
+JOIN cdm.concept c ON c.concept_id = xa.descendant_concept_id
+ORDER BY x.concept_id, c.concept_name;

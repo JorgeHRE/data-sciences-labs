@@ -63,9 +63,9 @@ Las tres versiones salen de la vista `results.cs_t2dm` (ver `concept_set.sql`, a
 |---|---|---|
 | **A — estricta** | solo la semilla `201826` | 1 |
 | **B — amplia** | semilla + todos sus descendientes | 15 |
-| **C — razonada** | semilla + rama `443732` «Disorder due to type 2 diabetes mellitus», cada una con sus descendientes, menos las exclusiones de la actividad 6 (cada exclusión con sus descendientes) | 134 (provisional, sin exclusiones) |
+| **C — razonada** | semilla + rama `443732` «Disorder due to type 2 diabetes mellitus», cada una con sus descendientes, menos las exclusiones de la actividad 6 (cada exclusión con sus descendientes) | 131 (134 antes de las 3 exclusiones de la actividad 6) |
 
-Los 134 conceptos son estándar, de dominio Condition y están vigentes, y las dos ramas no comparten ninguno. La versión C se completa en la actividad 6.
+Los 134 conceptos de partida son estándar, de dominio Condition y están vigentes, y las dos ramas no comparten ninguno. La revisión de la actividad 6 quitó 3 (embarazo ×2 y remisión), cada uno con sus descendientes: C queda en 131.
 
 ## 5. Impacto en pacientes distintos
 
@@ -73,7 +73,7 @@ Los 134 conceptos son estándar, de dominio Condition y están vigentes, y las d
 |---|---|---|---|---|---|
 | A — estricta | 1 | 444 | **444** | — | 7.5 % |
 | B — amplia | 15 | 444 | **444** | +0 (+0.0 %) | 7.5 % |
-| C — razonada (provisional) | 134 | 2,163 | **1,085** | +641 (+144.4 %) | 18.4 % |
+| C — razonada | 131 | 2,163 | **1,085** | +641 (+144.4 %) | 18.4 % |
 
 C frente a B: +641 pacientes (+144.4 %). Se cuentan pacientes distintos: en C hay 2,163 filas para 1,085 pacientes, porque un paciente puede tener T2DM y una o varias complicaciones registradas.
 
@@ -81,4 +81,56 @@ C frente a B: +641 pacientes (+144.4 %). Se cuentan pacientes distintos: en C ha
 
 `figura_impacto.png` se genera con `figura_impacto.py` a partir de la vista `results.cs_t2dm`.
 
-**Qué prevalencia reportaría.** Reportaría la de la **versión C** (cuando esté cerrada en la actividad 6) como estimación principal, y A y B como análisis de sensibilidad. A y B solo cuentan a quien tiene registrado el código de T2DM, y dejan fuera a 641 pacientes cuyo diagnóstico consta únicamente como una complicación «due to type 2 diabetes mellitus», algo que no puede existir sin T2DM. Reportar A subestimaría la prevalencia en más de la mitad, por una particularidad de la jerarquía de SNOMED y no por un criterio clínico. Que B no añada pacientes respecto de A muestra que, en esta base, «incluir descendientes» no es la decisión que más pesa: lo que más pesa es reconocer la rama hermana. Mostrar las tres cifras deja ver al lector cuánto depende el resultado de la definición. Dos limitaciones: el denominador incluye a todas las personas de la base (también niños y personas con poco seguimiento), y los datos son sintéticos (Synthea), así que el 18.4 % valida el método pero no estima la prevalencia real.
+**Qué prevalencia reportaría.** Reportaría la de la **versión C** como estimación principal, y A y B como análisis de sensibilidad. A y B solo cuentan a quien tiene registrado el código de T2DM, y dejan fuera a 641 pacientes cuyo diagnóstico consta únicamente como una complicación «due to type 2 diabetes mellitus», algo que no puede existir sin T2DM. Reportar A subestimaría la prevalencia en más de la mitad, por una particularidad de la jerarquía de SNOMED y no por un criterio clínico. Que B no añada pacientes respecto de A muestra que, en esta base, «incluir descendientes» no es la decisión que más pesa: lo que más pesa es reconocer la rama hermana. Mostrar las tres cifras deja ver al lector cuánto depende el resultado de la definición. Dos limitaciones: el denominador incluye a todas las personas de la base (también niños y personas con poco seguimiento), y los datos son sintéticos (Synthea), así que el 18.4 % valida el método pero no estima la prevalencia real.
+
+## 6. Revisión manual de descendientes
+
+La versión B tiene 14 descendientes (menos de 20), así que se revisaron todos. Como la versión C incluye además la rama `443732`, se revisó también una muestra de 20 de sus 118 descendientes, reproducible con `ORDER BY md5(concept_id::text || 'lab14') LIMIT 20` (la sal `'lab14'` hace de semilla fija; mismo resultado en cualquier máquina). Pregunta de cada veredicto: ¿este concepto identifica a un paciente con T2DM activa, candidato a usar metformina por esa causa?
+
+**Descendientes de B (14, todos):**
+
+| concept_id | nombre | pacientes | ¿pertenece? |
+|---|---|---|---|
+| 40483315 | Brittle type 2 diabetes mellitus | 0 | sí |
+| 45757474 | Diabetes mellitus type 2 without retinopathy | 0 | sí |
+| 4130162 | Insulin treated type 2 diabetes mellitus | 0 | sí |
+| 37163431 | Ketosis-resistant diabetes mellitus | 0 | sí |
+| 4063043 | Pre-existing type 2 diabetes mellitus | 0 | sí |
+| 43531010 | Pre-existing type 2 diabetes mellitus in pregnancy | 0 | **no** |
+| 4129519 | Pregnancy and type 2 diabetes mellitus | 0 | **no** |
+| 45757508 | Type 2 diabetes mellitus controlled by diet | 0 | sí |
+| 4230254 | Type 2 diabetes mellitus in nonobese | 0 | sí |
+| 4304377 | Type 2 diabetes mellitus in obese | 0 | sí |
+| 45766052 | Type 2 diabetes mellitus in remission | 0 | **no** |
+| 4099651 | Type 2 diabetes mellitus with ulcer | 0 | sí |
+| 40482801 | Uncontrolled type 2 diabetes mellitus | 0 | sí |
+| 40485020 | Well controlled type 2 diabetes mellitus | 0 | sí |
+
+**Muestra de la rama 443732 (20 de 118):**
+
+| concept_id | nombre | pacientes | ¿pertenece? |
+|---|---|---|---|
+| 37016768 | Autonomic neuropathy due to type 2 diabetes mellitus | 0 | sí |
+| 609114 | Bilateral nonproliferative retinopathy due to diabetes mellitus type 2 | 0 | sí |
+| 609117 | Bilateral proliferative retinopathy due to diabetes mellitus type 2 | 0 | sí |
+| 1075909 | Chronic kidney disease stage 3A due to type 2 diabetes mellitus | 0 | sí |
+| 376065 | Disorder of nervous system due to type 2 diabetes mellitus | 0 | sí |
+| 4223463 | Exudative maculopathy due to type 2 diabetes mellitus | 0 | sí |
+| 43530690 | Foot ulcer due to type 2 diabetes mellitus | 0 | sí |
+| 45757445 | Hypertension in chronic kidney disease stage 4 due to type 2 diabetes mellitus | 0 | sí |
+| 45770830 | Macular edema and retinopathy due to type 2 diabetes mellitus | 22 | sí |
+| 609101 | Mild nonproliferative retinopathy of right eye due to diabetes mellitus type 2 | 0 | sí |
+| 43531651 | Mixed hyperlipidemia due to type 2 diabetes mellitus | 0 | sí |
+| 609105 | Moderate nonproliferative retinopathy of right eye due to diabetes mellitus type 2 | 0 | sí |
+| 43531563 | Neuropathic arthropathy due to type 2 diabetes mellitus | 0 | sí |
+| 37312203 | Neuropathic ulcer of heel due to type 2 diabetes mellitus | 0 | sí |
+| 45770883 | Neuropathic ulcer of toe due to type 2 diabetes mellitus | 0 | sí |
+| 43530685 | Proliferative retinopathy due to type 2 diabetes mellitus | 15 | sí |
+| 609116 | Proliferative retinopathy of left eye due to diabetes mellitus type 2 | 0 | sí |
+| 443731 | Renal disorder due to type 2 diabetes mellitus | 0 | sí |
+| 45773064 | Traction detachment of retina due to type 2 diabetes mellitus | 0 | sí |
+| 36712686 | Ulcer of left foot due to type 2 diabetes mellitus | 0 | sí |
+
+**Falsos positivos:** 3 de 14 en B (dos de embarazo y uno de remisión) y 0 de 20 en la muestra de la rama. La muestra limpia respalda que la rama es homogénea: todos sus conceptos son «X due to type 2 diabetes» y presuponen la enfermedad. Por eso no se revisaron los 118 completos; se habría hecho si la muestra hubiera encontrado algún falso positivo.
+
+**Exclusiones que pasan a la versión C** (cada una con sus descendientes): `43531010`, `4129519` y `45766052`. C pasa de 134 a 131 conceptos. Ningún paciente de esta base tiene esos conceptos, así que la cohorte sigue en 1,085; la definición cambia aunque esta base no lo refleje.
