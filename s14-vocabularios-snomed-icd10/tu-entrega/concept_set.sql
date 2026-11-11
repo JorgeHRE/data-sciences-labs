@@ -39,3 +39,28 @@ LEFT JOIN cdm.concept_ancestor ca
        ON ca.ancestor_concept_id   = r.concept_id_2
       AND ca.descendant_concept_id = r.concept_id_1
 WHERE r.relationship_id = 'Is a';
+
+-- =====================================================================
+-- Actividad 1. Condición elegida: diabetes mellitus tipo 2 (SNOMED 201826).
+-- Antes de comprometerse: ¿hay suficientes pacientes (≥ ~50)?
+-- Por qué pacientes distintos y no filas: un diabético con 30 visitas
+-- genera 30 filas en condition_occurrence, pero es UN paciente.
+-- Se cuenta el concepto exacto y con descendientes (concept_ancestor
+-- incluye la semilla a distancia 0) para ver ya si la jerarquía añade
+-- pacientes. Orden lógico: FROM → WHERE → SELECT.
+-- =====================================================================
+SELECT 'exacto' AS alcance,
+       count(*)                     AS filas,
+       count(DISTINCT co.person_id) AS pacientes
+FROM cdm.condition_occurrence co
+WHERE co.condition_concept_id = 201826
+UNION ALL
+SELECT 'con descendientes',
+       count(*),
+       count(DISTINCT co.person_id)
+FROM cdm.condition_occurrence co
+-- IN (subconsulta) y no JOIN: solo pregunta "¿está en la lista?", así que
+-- no puede duplicar filas aunque la lista tuviera repetidos.
+WHERE co.condition_concept_id IN (SELECT descendant_concept_id
+                                  FROM cdm.concept_ancestor
+                                  WHERE ancestor_concept_id = 201826);
