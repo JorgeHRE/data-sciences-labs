@@ -601,3 +601,135 @@ SELECT regla_aplicada, unidad_original_texto, unidad_inferida,
 FROM results.globulina_normalizada
 GROUP BY 1, 2, 3
 ORDER BY filas DESC;
+
+-- =====================================================================
+-- Actividad 8a. Criterios de plausibilidad (citados) y valores fuera
+-- Decisión 10: creatinina, HbA1c y colesterol. Los rangos NO se inventan:
+--  * Creatinina 0.1-5 mg/dL y colesterol 50-500 mg/dL: OHDSI Data Quality
+--    Dashboard v2.9.1, inst/csv/OMOP_CDMv5.4_Concept_Level.csv. Allí están
+--    definidos sobre conceptos SNOMED (37392176; 37393449...); se aplican
+--    al LOINC equivalente (mismo analito y unidad).
+--  * HbA1c 3.5-20.0 %: rango reportable del método NHANES (Bio-Rad D-100
+--    HPLC, manual revisado 2023-12-05, sección 9). Fuera de él el
+--    laboratorio informa "< 3.5" / "> 20.0", nunca un número.
+-- Se guardan en una tabla para reutilizarlos al marcar filas (8c).
+-- LEFT JOIN de criterios a measurement por concepto+unidad: cada fila de
+-- measurement casa con un solo criterio → no multiplica filas.
+-- =====================================================================
+DROP TABLE IF EXISTS results.criterios_plausibilidad;
+CREATE TABLE results.criterios_plausibilidad AS
+SELECT * FROM (VALUES
+  (3051825, 8840, 'Creatinina',  0.1,   5.0, 'OHDSI DQD v2.9.1 (SNOMED 37392176, mg/dL)'),
+  (3004410, 8554, 'HbA1c',       3.5,  20.0, 'NHANES GHB Bio-Rad D-100, sec. 9 rango reportable'),
+  (3027114, 8840, 'Colesterol', 50.0, 500.0, 'OHDSI DQD v2.9.1 (SNOMED 37393449, mg/dL)')
+) AS t(measurement_concept_id, unit_concept_id, analito, bajo, alto, fuente);
+
+-- Conteos: total, nulos, por debajo, dentro, por encima (filas y pacientes)
+SELECT k.analito, k.bajo, k.alto,
+       count(m.measurement_id)                                   AS mediciones,
+       count(*) FILTER (WHERE m.value_as_number IS NULL)         AS nulos,
+       count(*) FILTER (WHERE m.value_as_number <  k.bajo)       AS por_debajo,
+       count(*) FILTER (WHERE m.value_as_number >  k.alto)       AS por_encima,
+       round(100.0 * count(*) FILTER (WHERE m.value_as_number NOT BETWEEN k.bajo AND k.alto)
+             / count(m.measurement_id), 1)                       AS pct_fuera,
+       count(DISTINCT m.person_id) FILTER (WHERE m.value_as_number NOT BETWEEN k.bajo AND k.alto)
+                                                                 AS pacientes_fuera,
+       count(*) FILTER (WHERE m.unit_concept_id <> k.unit_concept_id) AS otra_unidad
+FROM results.criterios_plausibilidad k
+LEFT JOIN cdm.measurement m ON m.measurement_concept_id = k.measurement_concept_id
+GROUP BY k.analito, k.bajo, k.alto
+ORDER BY k.analito;
+
+-- =====================================================================
+-- Actividad 8b. Centinelas y contexto clínico
+-- (1) Centinela = valor fuera de rango que se repite EXACTAMENTE mucho más
+--     que sus vecinos (p. ej. 9999 o un valor por defecto del sistema).
+--     Se compara cada valor con la media de los valores ±0.1 a su lado:
+--     una pila aislada (razón >> 1) es sospechosa; una curva suave, no.
+-- (2) Creatinina > 5 según contexto renal: diálisis (procedure) o ERC
+--     terminal (condition) registrada ANTES o el mismo día de la medición.
+--     El contexto posterior no cuenta (no se puede usar el futuro).
+-- =====================================================================
+-- (1) top 5 de valores fuera de rango por analito, frente a sus vecinos
+WITH fuera AS (
+  SELECT k.analito, m.value_as_number AS v, count(*) AS n
+  FROM results.criterios_plausibilidad k
+  JOIN cdm.measurement m ON m.measurement_concept_id = k.measurement_concept_id
+  WHERE m.value_as_number NOT BETWEEN k.bajo AND k.alto
+  GROUP BY k.analito, m.value_as_number
+)
+SELECT * FROM (
+  SELECT f.analito, f.v AS valor, f.n AS repeticiones,
+         coalesce((SELECT round(avg(g.n), 1) FROM fuera g
+                   WHERE g.analito = f.analito AND abs(g.v - f.v) BETWEEN 0.05 AND 0.15), 0) AS media_vecinos,
+         row_number() OVER (PARTITION BY f.analito ORDER BY f.n DESC) AS rk
+  FROM fuera f) t
+WHERE rk <= 5
+ORDER BY analito, rk;
+
+-- (2) creatinina > 5 mg/dL según contexto renal previo
+WITH renal AS (            -- primera fecha de contexto renal por paciente
+  SELECT person_id, min(fecha) AS desde FROM (
+    SELECT p.person_id, p.procedure_date AS fecha
+    FROM cdm.procedure_occurrence p WHERE p.procedure_concept_id IN (4120120, 4146536)
+    UNION ALL
+    SELECT o.person_id, o.condition_start_date
+    FROM cdm.condition_occurrence o JOIN cdm.concept c ON c.concept_id = o.condition_concept_id
+    WHERE c.concept_name ILIKE '%end-stage renal%') x
+  GROUP BY person_id)      -- 1 fila por paciente → el LEFT JOIN no multiplica
+SELECT CASE WHEN m.value_as_number > 30 THEN 'b >30' ELSE 'a 5-30' END AS tramo,
+       CASE WHEN r.desde <= m.measurement_date THEN 'contexto renal previo'
+            WHEN r.desde IS NOT NULL            THEN 'contexto solo posterior'
+            ELSE 'sin contexto renal' END       AS contexto,
+       count(*) AS mediciones, count(DISTINCT m.person_id) AS pacientes,
+       min(m.value_as_number) AS minimo, max(m.value_as_number) AS maximo
+FROM cdm.measurement m
+LEFT JOIN renal r ON r.person_id = m.person_id
+WHERE m.measurement_concept_id = 3051825 AND m.value_as_number > 5
+GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- =====================================================================
+-- Actividad 8c. Marcar cada medición (no se borra nada)
+-- Decisión 11: marcar en todos los grupos; solo la HbA1c < 3.5 % pasa a
+-- NULL en valor_analitico (un laboratorio la informaría como "< 3.5",
+-- sin número). valor_original se conserva siempre.
+-- Creatinina > 5: se clasifica por contexto renal (8b) con la fecha:
+-- previo = extremo real; solo posterior o ninguno = revisar.
+-- Granularidad: 1 fila por measurement_id de los 3 analitos.
+-- =====================================================================
+DROP TABLE IF EXISTS results.measurement_plausibilidad;
+CREATE TABLE results.measurement_plausibilidad AS
+WITH renal AS (
+  SELECT person_id, min(fecha) AS desde FROM (
+    SELECT person_id, procedure_date AS fecha FROM cdm.procedure_occurrence
+    WHERE procedure_concept_id IN (4120120, 4146536)
+    UNION ALL
+    SELECT o.person_id, o.condition_start_date FROM cdm.condition_occurrence o
+    JOIN cdm.concept c ON c.concept_id = o.condition_concept_id
+    WHERE c.concept_name ILIKE '%end-stage renal%') x
+  GROUP BY person_id)
+SELECT m.measurement_id, m.person_id, m.measurement_date, k.analito,
+       m.value_as_number AS valor_original, m.unit_concept_id,
+       CASE WHEN m.value_as_number BETWEEN k.bajo AND k.alto THEN 'dentro_rango'
+            WHEN k.analito = 'HbA1c'                          THEN 'implausible_metodo'
+            WHEN k.analito = 'Creatinina' AND r.desde <= m.measurement_date
+                                                              THEN 'extremo_real_contexto_renal'
+            WHEN k.analito = 'Creatinina' AND r.desde IS NOT NULL
+                                                              THEN 'revisar_contexto_posterior'
+            WHEN k.analito = 'Creatinina'                     THEN 'revisar_sin_contexto'
+            ELSE 'extremo_cerca_limite' END                   AS clasificacion,
+       CASE WHEN k.analito = 'HbA1c' AND m.value_as_number < k.bajo THEN NULL
+            ELSE m.value_as_number END                        AS valor_analitico,
+       k.fuente                                               AS fuente_rango
+FROM results.criterios_plausibilidad k
+JOIN cdm.measurement m ON m.measurement_concept_id = k.measurement_concept_id
+LEFT JOIN renal r ON r.person_id = m.person_id;   -- renal: 1 fila/paciente
+
+-- Verificación: total esperado 162,409 (34,334 + 69,106 + 58,969, de 8a)
+SELECT analito, clasificacion, count(*) AS filas,
+       count(DISTINCT person_id) AS pacientes,
+       count(valor_analitico)    AS con_valor_analitico,
+       min(valor_original) AS minimo, max(valor_original) AS maximo
+FROM results.measurement_plausibilidad
+GROUP BY ROLLUP (analito, clasificacion)
+ORDER BY analito NULLS LAST, filas DESC;
