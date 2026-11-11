@@ -1,7 +1,8 @@
 -- =====================================================================
 -- Lab 14 — Construir y defender un concept set (SNOMED CT e ICD-10-CM)
 -- Base: Postgres del lab 12 (contenedor lab12-omop-db-1, BD omop_lab12).
--- El esquema cdm es de solo lectura: este archivo no modifica nada.
+-- El esquema cdm es de solo lectura. Lo propio (vista del concept set y
+-- tabla de exclusiones) se escribe en el esquema results (actividad 4).
 -- Ejecutar completo:
 --   docker exec -i lab12-omop-db-1 psql -U <usuario> -d omop_lab12 \
 --     -v ON_ERROR_STOP=1 < concept_set.sql
@@ -232,3 +233,60 @@ SELECT CASE
 FROM destinos d
 GROUP BY d.concept_id, d.concept_name
 ORDER BY donde_cae DESC, d.concept_name;
+
+-- =====================================================================
+-- Actividad 4a. Las tres versiones del concept set (decisión 6).
+-- Tabla de exclusiones: las rellena la actividad 6, una fila por concepto
+-- excluido y SIEMPRE con su motivo clínico (NOT NULL). IF NOT EXISTS: si
+-- el archivo se vuelve a ejecutar, no borra exclusiones ya decididas.
+-- =====================================================================
+CREATE SCHEMA IF NOT EXISTS results;
+
+CREATE TABLE IF NOT EXISTS results.cs_t2dm_exclusiones (
+    concept_id integer PRIMARY KEY,   -- PK: un concepto no se excluye dos veces
+    motivo     text    NOT NULL
+);
+
+-- Vista en formato largo: una fila por (versión, concepto). No guarda
+-- datos: se recalcula desde concept_ancestor cada vez que se consulta.
+--   A: solo la semilla.
+--   B: semilla + descendientes (concept_ancestor incluye la semilla a
+--      distancia 0, por eso no hace falta añadirla aparte).
+--   C: semilla y rama 443732 (decisión 4), cada una con descendientes,
+--      MENOS cada exclusión y sus propios descendientes.
+-- DISTINCT en C: las dos ramas hoy no comparten conceptos, pero si un
+-- vocabulario futuro los compartiera, el concepto no saldría dos veces.
+-- NOT EXISTS y no NOT IN: si hubiera un NULL en la subconsulta, NOT IN
+-- devolvería cero filas sin avisar.
+CREATE OR REPLACE VIEW results.cs_t2dm AS
+SELECT 'A' AS version, 201826 AS concept_id
+UNION ALL
+SELECT 'B', ca.descendant_concept_id
+FROM cdm.concept_ancestor ca
+WHERE ca.ancestor_concept_id = 201826
+UNION ALL
+SELECT DISTINCT 'C', ca.descendant_concept_id
+FROM cdm.concept_ancestor ca
+WHERE ca.ancestor_concept_id IN (201826, 443732)
+  AND NOT EXISTS (SELECT 1
+                  FROM results.cs_t2dm_exclusiones x
+                  JOIN cdm.concept_ancestor xa
+                    ON xa.ancestor_concept_id = x.concept_id
+                  WHERE xa.descendant_concept_id = ca.descendant_concept_id);
+
+-- Actividad 4b. Conceptos por versión. Esperado (sin exclusiones aún):
+-- A 1 · B 15 · C 134. count(DISTINCT) = count(*) confirma 0 duplicados.
+SELECT version, count(*) AS filas, count(DISTINCT concept_id) AS conceptos
+FROM results.cs_t2dm
+GROUP BY version
+ORDER BY version;
+
+-- Actividad 4c. Prueba de que la exclusión funciona (control que puede
+-- fallar). Dentro de una transacción que se deshace con ROLLBACK: no deja
+-- nada en la tabla. Si excluimos la rama 443732 entera, C debe caer de
+-- 134 a 15 (= B): se quitan 443732 Y sus 118 descendientes.
+BEGIN;
+INSERT INTO results.cs_t2dm_exclusiones VALUES (443732, 'prueba: se deshace');
+SELECT version, count(*) AS conceptos_con_prueba
+FROM results.cs_t2dm WHERE version = 'C' GROUP BY version;
+ROLLBACK;
