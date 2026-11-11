@@ -290,3 +290,68 @@ INSERT INTO results.cs_t2dm_exclusiones VALUES (443732, 'prueba: se deshace');
 SELECT version, count(*) AS conceptos_con_prueba
 FROM results.cs_t2dm WHERE version = 'C' GROUP BY version;
 ROLLBACK;
+
+-- =====================================================================
+-- Actividad 5a. Pacientes distintos por versión.
+-- Por qué count(DISTINCT person_id): un paciente puede tener varias filas
+-- (varias visitas o varios conceptos del set, p. ej. T2DM + nefropatía);
+-- es UNO. Se muestran también las filas para ver la diferencia.
+-- JOIN a la vista: (version, concept_id) no tiene duplicados (actividad 4b),
+-- así que cada fila de condition_occurrence entra a lo sumo una vez por
+-- versión. Conteo de control: filas de A deben ser 444 (actividad 1).
+-- Orden lógico: FROM/JOIN → GROUP BY → SELECT → ORDER BY.
+-- =====================================================================
+SELECT cs.version,
+       count(*)                     AS filas,
+       count(DISTINCT co.person_id) AS pacientes
+FROM results.cs_t2dm cs
+JOIN cdm.condition_occurrence co
+  ON co.condition_concept_id = cs.concept_id
+GROUP BY cs.version
+ORDER BY cs.version;
+
+-- =====================================================================
+-- Actividad 5b. Porcentaje de diferencia entre versiones.
+-- Fórmula: (versión − referencia) / referencia × 100, con la referencia
+-- siempre la versión MÁS estricta de la pareja (dice "cuánto añade
+-- ampliar"). NULLIF(…, 0) evita dividir entre cero si una versión
+-- quedara vacía: el resultado sería NULL en vez de un error.
+-- ::numeric antes de dividir: en Postgres, entero / entero trunca
+-- (1085 / 444 = 2, no 2.44).
+-- Orden lógico: CTE (FROM/JOIN → GROUP BY → SELECT) → FROM p → SELECT.
+-- =====================================================================
+WITH n AS (
+    SELECT cs.version, count(DISTINCT co.person_id) AS pacientes
+    FROM results.cs_t2dm cs
+    JOIN cdm.condition_occurrence co ON co.condition_concept_id = cs.concept_id
+    GROUP BY cs.version
+),
+p AS (   -- una sola fila con las tres cifras en columnas
+    SELECT max(pacientes) FILTER (WHERE version = 'A') AS a,
+           max(pacientes) FILTER (WHERE version = 'B') AS b,
+           max(pacientes) FILTER (WHERE version = 'C') AS c
+    FROM n
+)
+SELECT 'B vs A' AS comparacion, b - a AS diferencia,
+       round((b - a)::numeric / NULLIF(a, 0) * 100, 1) AS pct
+FROM p
+UNION ALL
+SELECT 'C vs A', c - a, round((c - a)::numeric / NULLIF(a, 0) * 100, 1) FROM p
+UNION ALL
+SELECT 'C vs B', c - b, round((c - b)::numeric / NULLIF(b, 0) * 100, 1) FROM p;
+
+-- =====================================================================
+-- Actividad 5d. Prevalencia bruta por versión (decisión 7).
+-- Denominador: todas las personas de cdm.person (5,904). El numerador es
+-- lo único que cambia entre versiones. CROSS JOIN con una subconsulta de
+-- una sola fila: añade el total a cada fila sin multiplicar nada
+-- (3 filas × 1 fila = 3 filas).
+-- =====================================================================
+SELECT n.version, n.pacientes, t.poblacion,
+       round(n.pacientes::numeric / t.poblacion * 100, 1) AS prevalencia_pct
+FROM (SELECT cs.version, count(DISTINCT co.person_id) AS pacientes
+      FROM results.cs_t2dm cs
+      JOIN cdm.condition_occurrence co ON co.condition_concept_id = cs.concept_id
+      GROUP BY cs.version) n
+CROSS JOIN (SELECT count(*) AS poblacion FROM cdm.person) t
+ORDER BY n.version;

@@ -66,3 +66,19 @@ Las tres versiones salen de la vista `results.cs_t2dm` (ver `concept_set.sql`, a
 | **C — razonada** | semilla + rama `443732` «Disorder due to type 2 diabetes mellitus», cada una con sus descendientes, menos las exclusiones de la actividad 6 (cada exclusión con sus descendientes) | 134 (provisional, sin exclusiones) |
 
 Los 134 conceptos son estándar, de dominio Condition y están vigentes, y las dos ramas no comparten ninguno. La versión C se completa en la actividad 6.
+
+## 5. Impacto en pacientes distintos
+
+| Versión | Conceptos | Filas en `condition_occurrence` | Pacientes distintos | Diferencia vs A | Prevalencia bruta (/ 5,904) |
+|---|---|---|---|---|---|
+| A — estricta | 1 | 444 | **444** | — | 7.5 % |
+| B — amplia | 15 | 444 | **444** | +0 (+0.0 %) | 7.5 % |
+| C — razonada (provisional) | 134 | 2,163 | **1,085** | +641 (+144.4 %) | 18.4 % |
+
+C frente a B: +641 pacientes (+144.4 %). Se cuentan pacientes distintos: en C hay 2,163 filas para 1,085 pacientes, porque un paciente puede tener T2DM y una o varias complicaciones registradas.
+
+![Pacientes distintos por versión](figura_impacto.png)
+
+`figura_impacto.png` se genera con `figura_impacto.py` a partir de la vista `results.cs_t2dm`.
+
+**Qué prevalencia reportaría.** Reportaría la de la **versión C** (cuando esté cerrada en la actividad 6) como estimación principal, y A y B como análisis de sensibilidad. A y B solo cuentan a quien tiene registrado el código de T2DM, y dejan fuera a 641 pacientes cuyo diagnóstico consta únicamente como una complicación «due to type 2 diabetes mellitus», algo que no puede existir sin T2DM. Reportar A subestimaría la prevalencia en más de la mitad, por una particularidad de la jerarquía de SNOMED y no por un criterio clínico. Que B no añada pacientes respecto de A muestra que, en esta base, «incluir descendientes» no es la decisión que más pesa: lo que más pesa es reconocer la rama hermana. Mostrar las tres cifras deja ver al lector cuánto depende el resultado de la definición. Dos limitaciones: el denominador incluye a todas las personas de la base (también niños y personas con poco seguimiento), y los datos son sintéticos (Synthea), así que el 18.4 % valida el método pero no estima la prevalencia real.

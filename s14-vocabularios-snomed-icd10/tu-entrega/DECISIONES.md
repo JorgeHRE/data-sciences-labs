@@ -32,3 +32,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** una vista `results.cs_t2dm` en formato largo (`version`, `concept_id`), calculada desde `concept_ancestor`, y una tabla `results.cs_t2dm_exclusiones` (`concept_id` clave primaria, `motivo` obligatorio) que se llena en la actividad 6. Cada exclusión arrastra a sus descendientes.
 - **Alternativas:** solo consultas SELECT sin guardar nada (descartada: las actividades 5-6 y la sesión 17 tendrían que copiar la lógica) o una tabla con el resultado (descartada: queda desfasada sin avisar si cambian las exclusiones o el vocabulario; sirve cuando se congela un protocolo).
 - **Por qué:** la lógica se escribe una sola vez y siempre está al día. Las exclusiones quedan como datos con su motivo, igual que en ATLAS («incluir descendientes» / «excluir»). El formato largo permite contar las tres versiones con un solo `GROUP BY`. Resultado sin exclusiones: A 1, B 15, C 134. Prueba con ROLLBACK: excluir 443732 deja C en 15.
+
+## 7. Denominador de la prevalencia (actividad 5)
+- **Decisión:** prevalencia bruta = pacientes distintos con la versión / todas las personas de `cdm.person` (5,904).
+- **Alternativas:** personas con al menos una condición registrada (5,826; descartada: es un denominador sesgado, porque solo cuenta a quien ya tiene algún diagnóstico) o adultos con periodo de observación (la correcta para publicar; se deja para la sesión 17, donde la cohorte tendrá fechas, edad en una fecha índice y ventana de observación).
+- **Por qué:** el objetivo de la actividad es mostrar cuánto cambia el **numerador** según la definición; un denominador simple y fijo lo aísla sin añadir otra decisión. Resultado: A 7.5 %, B 7.5 %, C 18.4 % (C provisional).
