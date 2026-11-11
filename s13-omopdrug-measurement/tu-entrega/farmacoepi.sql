@@ -806,3 +806,53 @@ WHERE domain_id = 'Race' AND standard_concept = 'S'
   AND (concept_name ILIKE '%hawaiian%' OR concept_name ILIKE '%american indian%'
        OR concept_name ILIKE '%more than one%' OR concept_name ILIKE 'other race%')
 ORDER BY concept_id;
+
+-- =====================================================================
+-- Actividad 10a. Creatinina basal más cercana al inicio de lisinopril
+-- Decisión 13: índice = primera receta de lisinopril (results.lisinopril_
+-- exposicion, 1,522 pac.); analito = creatinina (valor_analitico de 8c).
+--  * Política A (principal): días en [-90, 0]. Después del índice el
+--    lisinopril ya puede subir la creatinina → usarla sería fuga.
+--  * Política B (contraste): días en [-90, +90], como pide el enunciado.
+-- "Más cercano" = menor |días|; empate (−d y +d) gana el anterior (días
+-- ASC); mismo día → measurement_id DESC (determinista, no clínico).
+-- Patrón de la sesión 11: ROW_NUMBER() por paciente y quedarse con rn = 1.
+-- Granularidad final: 1 fila por paciente con índice (LEFT JOIN → NULL si no hay).
+-- =====================================================================
+DROP TABLE IF EXISTS results.creatinina_basal;
+CREATE TABLE results.creatinina_basal AS
+WITH indice AS (
+  SELECT person_id, min(inicio) AS fecha_indice
+  FROM results.lisinopril_exposicion GROUP BY person_id),
+candidatos AS (            -- todos los valores en ±90 días (antes de elegir)
+  SELECT i.person_id, p.measurement_id, p.valor_analitico, p.clasificacion,
+         p.measurement_date - i.fecha_indice AS dias      -- <0 antes, >0 después
+  FROM indice i
+  JOIN results.measurement_plausibilidad p
+    ON p.person_id = i.person_id AND p.analito = 'Creatinina'
+   AND p.measurement_date BETWEEN i.fecha_indice - 90 AND i.fecha_indice + 90
+  WHERE p.valor_analitico IS NOT NULL),
+rank_a AS (
+  SELECT *, row_number() OVER (PARTITION BY person_id
+              ORDER BY abs(dias), dias, measurement_id DESC) AS rn
+  FROM candidatos WHERE dias <= 0),
+rank_b AS (
+  SELECT *, row_number() OVER (PARTITION BY person_id
+              ORDER BY abs(dias), dias, measurement_id DESC) AS rn
+  FROM candidatos)
+SELECT i.person_id, i.fecha_indice,
+       a.valor_analitico AS creat_a, a.dias AS dias_a, a.clasificacion AS clasif_a,
+       b.valor_analitico AS creat_b, b.dias AS dias_b, b.clasificacion AS clasif_b
+FROM indice i
+LEFT JOIN rank_a a ON a.person_id = i.person_id AND a.rn = 1
+LEFT JOIN rank_b b ON b.person_id = i.person_id AND b.rn = 1;
+
+-- Verificación: 1 fila por paciente (esperado 1,522 y 0 duplicados)
+SELECT count(*) AS filas, count(DISTINCT person_id) AS pacientes,
+       count(creat_a) AS con_valor_a, count(*) - count(creat_a) AS sin_valor_a,
+       round(100.0 * count(creat_a) / count(*), 1) AS pct_a,
+       count(creat_b) AS con_valor_b, round(100.0 * count(creat_b) / count(*), 1) AS pct_b,
+       count(*) FILTER (WHERE dias_b > 0)              AS b_usa_posterior,
+       count(*) FILTER (WHERE creat_a <> creat_b)      AS a_y_b_distintos,
+       count(*) FILTER (WHERE dias_a = 0)              AS a_del_dia_0
+FROM results.creatinina_basal;
