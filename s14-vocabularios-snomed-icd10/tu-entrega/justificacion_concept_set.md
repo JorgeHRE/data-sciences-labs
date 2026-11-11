@@ -54,3 +54,15 @@ Es estándar, su dominio es Condition (sus pacientes están en `condition_occurr
 - Todas las complicaciones caen en la rama `443732`, ninguna bajo la semilla: la decisión de incluir esa rama en la versión C tiene respaldo en cómo se codifica en la práctica.
 - Dos destinos «bajo la semilla» son candidatos a exclusión en la actividad 6: `43531010` (embarazo) y `45766052` (en remisión). Ojo: E11.A mapea solo a «in remission», no a T2DM.
 - Los 5 destinos «fuera» no son T2DM y no deben entrar: «Diabetes mellitus» y «Complication due to diabetes mellitus» son más generales (incluyen la tipo 1), «First trimester pregnancy» describe el embarazo, «Prediabetes» es otra entidad y «Long-term current use of drug therapy» es una observación sobre el tratamiento.
+
+## 4. Tres versiones del concept set
+
+Las tres versiones salen de la vista `results.cs_t2dm` (ver `concept_set.sql`, actividad 4a), calculada desde `concept_ancestor`. No hay listas pegadas a mano.
+
+| Versión | Definición | Conceptos |
+|---|---|---|
+| **A — estricta** | solo la semilla `201826` | 1 |
+| **B — amplia** | semilla + todos sus descendientes | 15 |
+| **C — razonada** | semilla + rama `443732` «Disorder due to type 2 diabetes mellitus», cada una con sus descendientes, menos las exclusiones de la actividad 6 (cada exclusión con sus descendientes) | 134 (provisional, sin exclusiones) |
+
+Los 134 conceptos son estándar, de dominio Condition y están vigentes, y las dos ramas no comparten ninguno. La versión C se completa en la actividad 6.
