@@ -1,6 +1,6 @@
 # Reporte de calidad — Lab 13 (Drug Exposure y Measurement)
 
-Base: OMOP CDM del lab 12 (Synthea, 5,000 pacientes, ETL-Synthea), Postgres `omop_lab12`, esquema `cdm`. Consultas en `farmacoepi.sql`.
+Base: OMOP CDM del lab 12 (Synthea, 5,904 pacientes = 5,000 vivos + 904 fallecidos, ETL-Synthea), Postgres `omop_lab12`, esquema `cdm`. Consultas en `farmacoepi.sql`.
 
 ## 1. Tipo de exposición
 
@@ -146,16 +146,31 @@ Los primeros puestos por número de mediciones no coinciden con los primeros por
 
 ### 6b. Unidades de la globulina (3027970)
 
-| Unidad | `unit_source_value` | Mediciones | Pacientes | Mín | p05 | Mediana | p95 | Máx |
+| Unidad (`concept_name`) | `unit_source_value` | Mediciones | Pacientes | Mín | p05 | Mediana | p95 | Máx |
 |---|---|---|---|---|---|---|---|---|
-| g/L (8636) | g/L | 20,412 | 998 | 2.0 | 2.1 | 2.8 | 3.4 | 3.5 |
-| g/dL (8713) | g/dL | 16 | 16 | 2.0 | 2.0 | 3.1 | 3.9 | 4.0 |
+| g/L (8636, gram per liter) | g/L | 20,412 | 998 | 2.0 | 2.1 | 2.8 | 3.4 | 3.5 |
+| g/dL (8713, gram per deciliter) | g/dL | 16 | 16 | 2.0 | 2.0 | 3.1 | 3.9 | 4.0 |
 
 **Hallazgo: unidad mal etiquetada en origen.** La globulina sérica normal está en torno a 2.0-3.5 g/dL, es decir, 20-35 g/L. Las dos unidades tienen valores en la misma escala (2-4), así que las 20,412 filas «en g/L» son en realidad g/dL: una mediana de 2.8 g/L equivaldría a 0.28 g/dL, un valor incompatible con la vida.
 - **Origen:** Synthea, no el ETL. `unit_source_value` ya dice «g/L» y el ETL lo mapeó fielmente al concepto 8636.
 - **Tipo (marco de Kahn, usado por OHDSI DQD):** falla de **plausibilidad**. El valor es imposible para la unidad declarada.
 - **Consecuencia:** una normalización que se fíe de la etiqueta multiplicaría por 10 solo las 16 filas en g/dL y mezclaría dos escalas que hoy son coherentes. La unidad real se decide **por el rango del valor**. Esa regla es válida aquí porque los rangos de g/dL (2-4) y g/L (20-40) no se solapan, y no sirve como método general (actividad 7).
 - No se corrige `cdm.measurement`. La corrección va a una tabla derivada que conserva el valor y la unidad originales.
+
+### 6b2. Unidades encontradas en toda la tabla
+
+Solo **8 de 255 analitos** tienen más de una unidad entre las filas con valor numérico. En 5 de ellos la segunda «unidad» es el concepto 0 (*No matching concept*), o sea, una unidad sin mapear, no una conversión:
+
+| Analito | Unidades (filas) | Tipo de problema |
+|---|---|---|
+| Filtrado glomerular (MDRD) | 0 (59,485) · mL/min (26,125) | Sin mapear: el texto de origen es «mL/min/{1.73_m2}» |
+| pH de orina (tira) | pH (60,361) · 0 (1,316) | Sin mapear |
+| Fosfatasa alcalina, AST, ALT | 0 (25,583) · [iU]/L (16) | Sin mapear |
+| Globulina | g/L (20,412) · g/dL (16) | **Etiqueta errónea en origen** (6b, actividad 7) |
+| Temperatura corporal | Cel (6,346) · [degF] (3) | Conversión real (afín: °C = (°F − 32) × 5/9) |
+| Troponina I | pg/mL (3,078) · ng/L (219) | Unidades equivalentes (1:1) |
+
+Synthea es mucho más limpio que un laboratorio real: casi todos los analitos tienen una sola unidad. El problema más frecuente es la **unidad sin mapear** (ETL o vocabulario), no la mezcla de unidades.
 
 ### 6c. Valores nulos y operador
 
@@ -292,6 +307,18 @@ Lo que sí cumple: **concordancia perfecta** entre tablas (4,747 coinciden, 0 di
 - Los 208 valores basales están dentro del rango plausible (media 1.17, mediana 1.1 mg/dL).
 
 **Implicación para la sesión 17:** solo el **13.7 %** de los iniciadores de lisinopril tiene creatinina basal. Si la cohorte exige función renal basal, pasa de 1,522 a 208 pacientes. Las alternativas son ampliar la ventana previa (más cobertura con una basal más antigua), tratar el dato faltante como tal (imputación, categoría «sin dato») o aceptar la pérdida declarando el posible sesgo de selección.
+
+## Limitación principal de la base
+
+**Son datos sintéticos de prescripción, y sus distribuciones reflejan las reglas del generador (Synthea), no la práctica clínica.** La base sirve para **construir y probar el pipeline** (consultas, eras, PDC, normalización, reglas de plausibilidad). No sirve para **estimar ningún parámetro clínico**. Evidencia medida en este lab:
+
+- **Exposición = receta, no toma:** solo hay prescripciones (sección 1). Cualquier exposición o adherencia está sobreestimada por definición.
+- **Recetas encadenadas sin huecos:** las eras de lisinopril duran ~10 años sin interrupción (sección 4) y el PDC sale 1.0 en el 100 % de los pacientes (sección 5), frente a ~50 % de adherentes en datos reales.
+- **Artefactos de duración:** el 35.3 % de `days_supply` es 0 y el 10.8 % son exactamente 371 días (sección 2).
+- **Laboratorios generados, no medidos:** la globulina es uniforme y está mal etiquetada (sección 7), y el 39.8 % de las HbA1c está por debajo de lo que un laboratorio puede reportar (sección 8).
+- **Demasiado limpia en lo que importa probar:** 0 valores censurados, `operator` vacío, casi una unidad por analito (sección 6). Un pipeline que pasa aquí **no queda validado** contra la suciedad de un sistema real.
+
+**Limitación secundaria:** la cobertura de laboratorio basal es baja. Solo el 13.7 % de los iniciadores de lisinopril tiene creatinina en los 90 días previos (sección 10). Exigirla en la sesión 17 reduciría la cohorte de 1,522 a 208 pacientes.
 
 ## Anexo. Checklist para reutilizar Synthea
 

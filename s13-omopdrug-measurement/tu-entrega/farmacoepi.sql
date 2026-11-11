@@ -497,6 +497,7 @@ LIMIT 15;
 -- =====================================================================
 SELECT m.unit_concept_id,
        coalesce(u.concept_code, '(sin concepto)')   AS unidad,
+       u.concept_name                               AS unidad_nombre,
        m.unit_source_value                          AS unidad_origen,
        count(*)                                     AS mediciones,
        count(DISTINCT m.person_id)                  AS pacientes,
@@ -509,8 +510,30 @@ SELECT m.unit_concept_id,
 FROM cdm.measurement m
 LEFT JOIN cdm.concept u ON u.concept_id = m.unit_concept_id
 WHERE m.measurement_concept_id = 3027970
-GROUP BY m.unit_concept_id, u.concept_code, m.unit_source_value
+GROUP BY m.unit_concept_id, u.concept_code, u.concept_name, m.unit_source_value
 ORDER BY mediciones DESC;
+
+-- =====================================================================
+-- Actividad 6b2. Unidades encontradas: analitos con más de una unidad
+-- Inventario para el reporte (no solo la globulina). La unidad 0 cuenta
+-- como «unidad» distinta: es un dato sin mapear, no una unidad real.
+-- string_agg arma la lista «código (filas)» por analito.
+-- =====================================================================
+WITH por_unidad AS (
+  SELECT m.measurement_concept_id, m.unit_concept_id, count(*) AS filas
+  FROM cdm.measurement m
+  WHERE m.value_as_number IS NOT NULL
+  GROUP BY 1, 2)
+SELECT a.concept_name                                      AS analito,
+       count(*)                                            AS unidades,
+       string_agg(coalesce(u.concept_code, '?') || ' (' || p.filas || ')', ', '
+                  ORDER BY p.filas DESC)                   AS unidades_y_filas
+FROM por_unidad p
+JOIN cdm.concept a ON a.concept_id = p.measurement_concept_id
+LEFT JOIN cdm.concept u ON u.concept_id = p.unit_concept_id
+GROUP BY a.concept_name
+HAVING count(*) > 1
+ORDER BY sum(p.filas) DESC;
 
 -- =====================================================================
 -- Actividad 6c. Valores nulos y operador en measurement
