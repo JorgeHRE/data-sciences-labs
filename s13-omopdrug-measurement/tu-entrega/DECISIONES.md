@@ -56,3 +56,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** marcar todas las filas en `results.measurement_plausibilidad` (`clasificacion`) sin borrar ninguna. Solo la HbA1c < 3.5 % pasa a NULL en `valor_analitico`; `valor_original` se conserva siempre. La creatinina > 5 se clasifica por contexto renal previo, posterior o ausente (diálisis o ERC terminal, respetando la fecha).
 - **Alternativas:** excluir las filas (descartada: sesga contra los pacientes renales y pierde el registro de que la prueba se hizo); excluir a los 276 pacientes con todas sus HbA1c bajas (descartada: tienen otros datos válidos); dejar el número de la HbA1c (descartada: baja la media de 5.27 % a 4.37 %).
 - **Por qué:** el rango poblacional detecta sospechosos, y el contexto del paciente decide. El nulo elimina un número imposible sin borrar el hecho de que la prueba se pidió, y las marcas permiten análisis de sensibilidad.
+
+## 12. Tercer hecho clínico: raza (actividad 9)
+- **Decisión:** comparar peso, tabaquismo y raza. La raza se contrasta entre `person` y `observation` y con la convención THEMIS sobre múltiples razas. Para analizar, la raza se toma de `person`.
+- **Alternativas:** dolor 0-10 (dato reportado por el paciente en `measurement`; descartada: THEMIS no tiene regla concreta con la que comparar); presión arterial (descartada: es un signo vital como el peso y no aporta nada nuevo); situación de vivienda (descartada: repite el patrón del tabaquismo).
+- **Por qué:** es el único hecho con una convención THEMIS específica y guardado en dos tablas, lo que permite medir la concordancia. Reveló un fallo de mapeo (96 personas de minorías con concepto 0) que se corregiría en `results` sin tocar el CDM, y de fondo en el ETL.
