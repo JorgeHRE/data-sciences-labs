@@ -99,3 +99,136 @@ SELECT count(*) AS descendientes
 FROM cdm.concept_ancestor
 WHERE ancestor_concept_id = 201826
   AND descendant_concept_id <> 201826;
+
+-- =====================================================================
+-- Actividad 3a. Traducir 16 códigos ICD-10-CM a conceptos estándar.
+-- Fuente: clasificación ICD-10-CM FY2027 (CDC/CMS), la versión cargada.
+-- 11 códigos E11 (uno por tipo de complicación) + 5 de borde.
+-- Los cuatro filtros:
+--   1. dirección: 'Maps to', con el ICD en concept_id_1 (fuente → estándar)
+--   2. destino estándar: e.standard_concept = 'S'
+--   3. destino vigente:  e.invalid_reason IS NULL
+--   4. relación vigente: r.invalid_reason IS NULL
+-- El código FUENTE no se filtra por vigencia a propósito: E11.640 está
+-- retirado, pero puede aparecer en historias antiguas y debe verse.
+-- LEFT JOIN (r JOIN e): el paréntesis une primero relación y destino, y
+-- solo después se cuelga del código. Así una relación cuyo destino no
+-- pasa los filtros se descarta entera y el código queda con NULL ("no
+-- mapea"), en vez de aparecer como fila con destino vacío.
+-- Orden lógico: FROM/JOIN → SELECT → ORDER BY.
+-- =====================================================================
+WITH codigos (codigo_icd10) AS (
+    VALUES ('E11.9'), ('E11.65'), ('E11.21'), ('E11.22'), ('E11.319'),
+           ('E11.42'), ('E11.51'), ('E11.621'), ('E11.649'), ('E11.8'),
+           ('E11.A'),
+           ('E11.640'), ('O24.111'), ('E13.9'), ('R73.03'), ('Z79.84')
+)
+SELECT k.codigo_icd10,
+       f.concept_id   AS concept_id_origen,
+       f.invalid_reason AS origen_retirado,
+       e.concept_id   AS concept_id_estandar,
+       e.concept_name AS nombre_estandar,
+       e.domain_id    AS dominio_estandar
+FROM codigos k
+JOIN cdm.concept f
+  ON f.concept_code = k.codigo_icd10 AND f.vocabulary_id = 'ICD10CM'
+LEFT JOIN (cdm.concept_relationship r
+           JOIN cdm.concept e
+             ON e.concept_id = r.concept_id_2
+            AND e.standard_concept = 'S'           -- filtro 2
+            AND e.invalid_reason IS NULL)          -- filtro 3
+  ON r.concept_id_1 = f.concept_id
+ AND r.relationship_id = 'Maps to'                 -- filtro 1
+ AND r.invalid_reason IS NULL                      -- filtro 4
+ORDER BY k.codigo_icd10, e.concept_id;
+
+-- =====================================================================
+-- Actividad 3b. ¿Cuántos códigos mapean a 0, 1 o más de 1 estándar?
+-- Mismos cuatro filtros que en 3a. Dos niveles de agregación:
+--   1) por código: n_estandar = cuántos destinos tiene cada uno
+--   2) por grupo:  cuántos códigos hay con 0, 1 o >1 destinos
+-- count(e.concept_id) y no count(*): count(*) contaría 1 también para
+-- el código sin mapeo (su fila existe, con NULL); count(columna) ignora
+-- los NULL y da 0, que es lo correcto.
+-- Grupos: la lista de 16 de la actividad 3a, y la categoría E11 completa.
+-- Orden lógico: FROM/JOIN → GROUP BY (por código) → SELECT → GROUP BY
+-- (por grupo) → SELECT → ORDER BY.
+-- =====================================================================
+WITH por_codigo AS (
+    SELECT f.concept_code,
+           f.concept_code IN ('E11.9', 'E11.65', 'E11.21', 'E11.22', 'E11.319',
+                              'E11.42', 'E11.51', 'E11.621', 'E11.649', 'E11.8',
+                              'E11.A', 'E11.640', 'O24.111', 'E13.9', 'R73.03',
+                              'Z79.84')       AS en_lista_16,
+           count(e.concept_id)                AS n_estandar
+    FROM cdm.concept f
+    LEFT JOIN (cdm.concept_relationship r
+               JOIN cdm.concept e
+                 ON e.concept_id = r.concept_id_2
+                AND e.standard_concept = 'S' AND e.invalid_reason IS NULL)
+      ON r.concept_id_1 = f.concept_id
+     AND r.relationship_id = 'Maps to' AND r.invalid_reason IS NULL
+    WHERE f.vocabulary_id = 'ICD10CM'
+      AND (f.concept_code LIKE 'E11%' OR f.concept_code IN ('O24.111', 'E13.9', 'R73.03', 'Z79.84'))
+    GROUP BY f.concept_code
+)
+SELECT grupo,
+       count(*)                                AS codigos,
+       count(*) FILTER (WHERE n_estandar = 0)  AS sin_mapeo,
+       count(*) FILTER (WHERE n_estandar = 1)  AS mapeo_1_a_1,
+       count(*) FILTER (WHERE n_estandar > 1)  AS mapeo_1_a_n,
+       sum(n_estandar)                         AS filas_tras_join
+FROM (SELECT 'lista de 16' AS grupo, n_estandar FROM por_codigo WHERE en_lista_16
+      UNION ALL
+      SELECT 'categoría E11 completa', n_estandar FROM por_codigo
+      WHERE concept_code LIKE 'E11%') g
+GROUP BY grupo
+ORDER BY grupo DESC;
+
+-- =====================================================================
+-- Actividad 3c. Contraste: ¿dónde caen los destinos estándar de los 16
+-- códigos respecto al concept set? (decisión 5: la traducción ICD audita
+-- el concept set, no lo construye)
+--   'semilla'  → 201826 o descendiente (entra en las versiones A/B)
+--   'rama'     → 443732 o descendiente (entra en C, decisión 4)
+--   'fuera'    → ninguno de los dos: habría que justificar por qué no entra
+-- EXISTS solo pregunta "¿hay al menos una fila?" y no multiplica filas,
+-- a diferencia de un JOIN a concept_ancestor.
+-- Granularidad: una fila por destino estándar distinto (el JOIN 1:N ya
+-- no infla nada: se agrupa por destino y los códigos se listan juntos).
+-- Orden lógico: FROM/JOIN → GROUP BY → SELECT → ORDER BY.
+-- =====================================================================
+WITH codigos (codigo_icd10) AS (
+    VALUES ('E11.9'), ('E11.65'), ('E11.21'), ('E11.22'), ('E11.319'),
+           ('E11.42'), ('E11.51'), ('E11.621'), ('E11.649'), ('E11.8'),
+           ('E11.A'),
+           ('E11.640'), ('O24.111'), ('E13.9'), ('R73.03'), ('Z79.84')
+),
+destinos AS (
+    SELECT k.codigo_icd10, e.concept_id, e.concept_name
+    FROM codigos k
+    JOIN cdm.concept f
+      ON f.concept_code = k.codigo_icd10 AND f.vocabulary_id = 'ICD10CM'
+    -- JOIN normal (no LEFT): aquí solo interesan los códigos que SÍ mapean;
+    -- el que no mapea (E11.640) ya quedó documentado en 3a y 3b.
+    JOIN cdm.concept_relationship r
+      ON r.concept_id_1 = f.concept_id
+     AND r.relationship_id = 'Maps to' AND r.invalid_reason IS NULL
+    JOIN cdm.concept e
+      ON e.concept_id = r.concept_id_2
+     AND e.standard_concept = 'S' AND e.invalid_reason IS NULL
+)
+SELECT CASE
+         WHEN EXISTS (SELECT 1 FROM cdm.concept_ancestor a
+                      WHERE a.ancestor_concept_id = 201826
+                        AND a.descendant_concept_id = d.concept_id) THEN 'semilla'
+         WHEN EXISTS (SELECT 1 FROM cdm.concept_ancestor a
+                      WHERE a.ancestor_concept_id = 443732
+                        AND a.descendant_concept_id = d.concept_id) THEN 'rama'
+         ELSE 'fuera'
+       END                                             AS donde_cae,
+       d.concept_id, d.concept_name,
+       string_agg(d.codigo_icd10, ', ' ORDER BY d.codigo_icd10) AS codigos_icd10
+FROM destinos d
+GROUP BY d.concept_id, d.concept_name
+ORDER BY donde_cae DESC, d.concept_name;
