@@ -416,3 +416,84 @@ FROM results.cs_t2dm_exclusiones x
 JOIN cdm.concept_ancestor xa ON xa.ancestor_concept_id = x.concept_id
 JOIN cdm.concept c ON c.concept_id = xa.descendant_concept_id
 ORDER BY x.concept_id, c.concept_name;
+
+-- =====================================================================
+-- Actividad 7a. Evidencia para el párrafo de sensibilidad / VPP
+-- (decisión 10). ¿Se comportan como diabéticos los pacientes que entran
+-- en C SOLO por la rama de complicaciones? Se compara con quienes tienen
+-- el código 201826 (versión A). Una fila por grupo: cada subconsulta
+-- devuelve personas DISTINTAS, así que los JOIN no multiplican filas.
+--   metformina: ingrediente 1503297 y sus productos (concept_ancestor).
+--   insulina:   cualquier ingrediente RxNorm cuyo nombre contiene insulin.
+--   HbA1c:      3004410, máximo por persona; ≥ 6.5 % = umbral diagnóstico.
+-- Ojo: el lab 13 encontró HbA1c imposibles (pila en 2.3 %); la media
+-- está sesgada a la baja, por eso se cuenta también ≥ 6.5 %.
+-- Esperado: A 444 · 231 · 252 ≥ 6.5 | solo rama 641 · 0 metf · 402 ins · 1.
+-- =====================================================================
+WITH c AS (SELECT DISTINCT co.person_id
+           FROM cdm.condition_occurrence co
+           JOIN results.cs_t2dm cs ON cs.concept_id = co.condition_concept_id
+                                  AND cs.version = 'C'),
+a AS (SELECT DISTINCT person_id FROM cdm.condition_occurrence
+      WHERE condition_concept_id = 201826),
+metf AS (SELECT DISTINCT de.person_id FROM cdm.drug_exposure de
+         JOIN cdm.concept_ancestor x ON x.descendant_concept_id = de.drug_concept_id
+         WHERE x.ancestor_concept_id = 1503297),
+insu AS (SELECT DISTINCT de.person_id FROM cdm.drug_exposure de
+         JOIN cdm.concept_ancestor x ON x.descendant_concept_id = de.drug_concept_id
+         JOIN cdm.concept i ON i.concept_id = x.ancestor_concept_id
+                           AND i.concept_class_id = 'Ingredient'
+                           AND i.concept_name ILIKE '%insulin%'),
+hba1c AS (SELECT person_id, max(value_as_number) AS maximo
+          FROM cdm.measurement WHERE measurement_concept_id = 3004410
+          GROUP BY person_id)
+SELECT CASE WHEN a.person_id IS NOT NULL THEN 'A (tiene 201826)'
+            ELSE 'solo rama 443732' END              AS grupo,
+       count(*)                                      AS pacientes,
+       count(m.person_id)                            AS con_metformina,
+       count(i.person_id)                            AS con_insulina,
+       count(h.person_id)                            AS con_hba1c,
+       count(*) FILTER (WHERE h.maximo >= 6.5)       AS hba1c_max_ge_6_5
+FROM c
+LEFT JOIN a     ON a.person_id = c.person_id
+LEFT JOIN metf m ON m.person_id = c.person_id
+LEFT JOIN insu i ON i.person_id = c.person_id
+LEFT JOIN hba1c h ON h.person_id = c.person_id
+GROUP BY 1 ORDER BY 1;
+
+-- =====================================================================
+-- Actividad 7b. ¿Qué "segunda evidencia" filtraría a los dudosos?
+-- (decisión 10). Cuántos pacientes de cada grupo pasarían tres variantes:
+--   con_insulina: algún antidiabético (incluida insulina) o HbA1c ≥ 6.5
+--   sin_insulina: algún antidiabético NO insulínico o HbA1c ≥ 6.5
+--   solo_hba1c:   HbA1c ≥ 6.5 (evidencia de laboratorio, no de fármaco)
+-- Ojo: un requisito que incluya la metformina es CIRCULAR para una
+-- pregunta sobre el uso de metformina; se mide solo para ver el efecto.
+-- Esperado: A 444 → 444 / 393 / 252 · solo rama 641 → 402 / 1 / 1.
+-- =====================================================================
+WITH c AS (SELECT DISTINCT co.person_id FROM cdm.condition_occurrence co
+           JOIN results.cs_t2dm cs ON cs.concept_id = co.condition_concept_id
+                                  AND cs.version = 'C'),
+a AS (SELECT DISTINCT person_id FROM cdm.condition_occurrence
+      WHERE condition_concept_id = 201826),
+farmaco AS (SELECT DISTINCT de.person_id, i.concept_name ILIKE '%insulin%' AS es_insulina
+            FROM cdm.drug_exposure de
+            JOIN cdm.concept_ancestor x ON x.descendant_concept_id = de.drug_concept_id
+            JOIN cdm.concept i ON i.concept_id = x.ancestor_concept_id
+                              AND i.concept_class_id = 'Ingredient'
+            WHERE i.concept_name ILIKE ANY (ARRAY['%insulin%', 'metformin', 'glipizide',
+                  'glyburide', 'glimepiride', 'sitagliptin', 'liraglutide', 'semaglutide',
+                  'canagliflozin', 'empagliflozin', 'dapagliflozin', 'pioglitazone'])),
+h AS (SELECT DISTINCT person_id FROM cdm.measurement
+      WHERE measurement_concept_id = 3004410 AND value_as_number >= 6.5)
+SELECT CASE WHEN a.person_id IS NOT NULL THEN 'A (tiene 201826)'
+            ELSE 'solo rama 443732' END AS grupo,
+       count(*) AS pacientes,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM farmaco f WHERE f.person_id = c.person_id)
+                           OR EXISTS (SELECT 1 FROM h WHERE h.person_id = c.person_id)) AS con_insulina,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM farmaco f WHERE f.person_id = c.person_id
+                                                              AND NOT f.es_insulina)
+                           OR EXISTS (SELECT 1 FROM h WHERE h.person_id = c.person_id)) AS sin_insulina,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM h WHERE h.person_id = c.person_id)) AS solo_hba1c
+FROM c LEFT JOIN a ON a.person_id = c.person_id
+GROUP BY 1 ORDER BY 1;
