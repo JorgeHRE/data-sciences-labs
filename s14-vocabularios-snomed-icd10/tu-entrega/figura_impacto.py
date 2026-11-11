@@ -42,7 +42,7 @@ assert datos.to_dict() == {"A": 444, "B": 444, "C": 1085}, datos.to_dict()
 etiquetas = {
     "A": "A — estricta\nsolo 201826",
     "B": "B — amplia\n201826 + descendientes",
-    "C": "C — razonada (provisional)\n+ rama 443732, sin exclusiones",
+    "C": "C — razonada\n+ rama 443732 − 3 exclusiones",
 }
 ref = datos["A"]
 
