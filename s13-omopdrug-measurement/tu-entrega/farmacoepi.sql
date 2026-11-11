@@ -733,3 +733,76 @@ SELECT analito, clasificacion, count(*) AS filas,
 FROM results.measurement_plausibilidad
 GROUP BY ROLLUP (analito, clasificacion)
 ORDER BY analito NULLS LAST, filas DESC;
+
+-- =====================================================================
+-- Actividad 9a. ¿En qué tabla dejó el ETL cada hecho clínico?
+-- Regla del CDM: la tabla la decide el domain_id del concepto estándar.
+-- Se busca cada hecho en measurement, observation y person, y se muestra
+-- en qué campo quedó el valor (número, concepto o solo texto de origen).
+-- count(nullif(x, 0)): cuenta solo conceptos reales (0 = «sin concepto»).
+-- =====================================================================
+WITH hechos AS (
+  SELECT 'measurement' AS tabla, measurement_concept_id AS concept_id, person_id,
+         value_as_number, nullif(value_as_concept_id, 0) AS valor_concepto,
+         nullif(trim(value_source_value), '') AS valor_texto
+  FROM cdm.measurement WHERE measurement_concept_id IN (3025315, 43054909, 3046853, 4013886)
+  UNION ALL
+  SELECT 'observation', observation_concept_id, person_id,
+         value_as_number, nullif(value_as_concept_id, 0),
+         coalesce(nullif(trim(value_as_string), ''), nullif(trim(value_source_value), ''))
+  FROM cdm.observation WHERE observation_concept_id IN (3025315, 43054909, 3046853, 4013886)
+)
+SELECT h.tabla, c.concept_name AS hecho, c.domain_id, c.vocabulary_id,
+       count(*)                       AS filas,
+       count(DISTINCT h.person_id)    AS pacientes,
+       count(h.value_as_number)       AS con_numero,
+       count(h.valor_concepto)        AS con_concepto,
+       count(h.valor_texto)           AS con_texto
+FROM hechos h JOIN cdm.concept c ON c.concept_id = h.concept_id
+GROUP BY 1, 2, 3, 4
+UNION ALL   -- la raza también vive en person (1 fila por persona)
+SELECT 'person', 'race_concept_id', 'Race', NULL, count(*), count(DISTINCT person_id),
+       NULL, count(nullif(race_concept_id, 0)), count(nullif(trim(race_source_value), ''))
+FROM cdm.person
+ORDER BY hecho, tabla;
+
+-- =====================================================================
+-- Actividad 9b. Raza: ¿coinciden person y observation?
+-- Se reduce observation a 1 fila por paciente con su(s) raza(s) declarada(s)
+-- (sin «I choose not to answer», que es un NULL con otro nombre) y se
+-- compara con person. Las etiquetas de texto difieren entre tablas
+-- («Pacific Islander» vs «hawaiian»), así que se traducen con un VALUES.
+-- Granularidad tras el CTE obs: 1 fila por paciente → el JOIN no multiplica.
+-- =====================================================================
+WITH equiv(texto_obs, texto_person) AS (VALUES
+  ('White', 'white'), ('Black/African American', 'black'), ('Asian', 'asian'),
+  ('Other', 'other'), ('Pacific Islander', 'hawaiian'),
+  ('American Indian/Alaskan Native', 'native')),
+obs AS (
+  SELECT o.person_id,
+         count(DISTINCT e.texto_person)                      AS razas_distintas,
+         min(e.texto_person)                                 AS raza_obs,
+         bool_or(o.value_source_value LIKE 'I choose not%')  AS alguna_vez_no_responde
+  FROM cdm.observation o
+  LEFT JOIN equiv e ON e.texto_obs = o.value_source_value
+  WHERE o.observation_concept_id = 3046853
+  GROUP BY o.person_id)
+SELECT CASE WHEN o.person_id IS NULL        THEN '1 sin raza en observation'
+            WHEN o.razas_distintas = 0      THEN '2 solo «no responde»'
+            WHEN o.razas_distintas > 1      THEN '3 más de una raza'
+            WHEN o.raza_obs = p.race_source_value THEN '4 coincide'
+            ELSE '5 NO coincide' END        AS comparacion,
+       count(*) AS pacientes,
+       count(*) FILTER (WHERE o.alguna_vez_no_responde) AS con_algun_no_responde,
+       count(*) FILTER (WHERE p.race_concept_id = 0)    AS person_sin_mapear
+FROM cdm.person p
+LEFT JOIN obs o ON o.person_id = p.person_id
+GROUP BY 1 ORDER BY 1;
+
+-- ¿Hay conceptos estándar de raza para los textos que person dejó en 0?
+SELECT concept_id, concept_name, concept_code
+FROM cdm.concept
+WHERE domain_id = 'Race' AND standard_concept = 'S'
+  AND (concept_name ILIKE '%hawaiian%' OR concept_name ILIKE '%american indian%'
+       OR concept_name ILIKE '%more than one%' OR concept_name ILIKE 'other race%')
+ORDER BY concept_id;

@@ -245,6 +245,33 @@ Tabla `results.measurement_plausibilidad` (162,409 filas, una por medición). Co
 
 **Cautela adicional:** las HbA1c entre 3.5 y 3.9 % quedan como «dentro de rango» porque el método sí las reporta, pero están por debajo de la referencia (4-5.6 %). El manual las acompaña de la advertencia de posibles resultados falsamente bajos.
 
+## 9. `MEASUREMENT` contra `OBSERVATION`: peso, tabaquismo y raza
+
+**Reglas de referencia:**
+- Convención del CDM: *«Write the data record into the table(s) corresponding to the domain of the Standard CONCEPT_ID(s)»*. OMOP CDM, *Data Model Conventions*, https://ohdsi.github.io/CommonDataModel/dataModelConventions.html
+- THEMIS, *Rules for records with values* (ratificada el 24/09/2021, CDM 5.4): *«Only records where the source value maps to a CONCEPT_ID in the 'Measurement' domain should be included in this table»*; `value_as_number` y `value_as_concept_id` pueden coexistir. https://ohdsi.github.io/Themis/records_with_values.html
+- THEMIS, *How to handle multiple races or ethnicities per person*: una sola raza → `PERSON.race_concept_id`. Más de una → 1546847 «More than one race» en `person` y un registro por raza en `observation` con el concepto 4013886 «Race». Un valor válido más un NULL flavor → un solo registro en `person`. https://ohdsi.github.io/Themis/multiple_races_per_person.html
+- THEMIS no tiene convenciones específicas para el peso ni para el tabaquismo (revisadas sus páginas de MEASUREMENT y OBSERVATION). Aplican las reglas generales.
+
+**Comprobación global:** el 100 % de las filas está en la tabla de su dominio (`measurement` 4,008,280 Measurement; `observation` 1,929,625 Observation) y ningún concepto aparece en ambas tablas.
+
+| Hecho | Dónde quedó | Concepto (dominio) | Filas / pacientes | Valor | ¿Cumple? |
+|---|---|---|---|---|---|
+| Peso | `measurement` | 3025315 Body weight (Measurement) | 94,053 / 5,904 | `value_as_number` en kg | ✔ |
+| Tabaquismo | `observation` | 43054909 Tobacco smoking status (Observation) | 89,873 / 5,904 | **solo texto** en `value_source_value` | Tabla ✔ · valor ✘ |
+| Raza | `person` + `observation` | `race_concept_id` / LOINC 3046853 (Observation) | 5,904 / 71,308 en 4,748 pac. | concepto en `person`; solo texto en `observation` | Parcial |
+
+**Tabaquismo.** Respuestas: «Never smoked tobacco» 65,764, «Ex-smoker» 23,880, «Smokes tobacco daily» 229. Todas están en `value_source_value`, con `value_as_concept_id` = 0, aunque el vocabulario tiene respuestas estándar (p. ej., LOINC 45879404 «Never smoker», 45883458 «Former smoker»). Para identificar fumadores hay que filtrar por texto. Pasa lo mismo en el 93 % de `observation` (1,795,820 de 1,929,625 filas solo tienen texto).
+
+**Raza.** Desvíos frente a THEMIS:
+1. **Duplicada:** además de `person`, aparece en cada encuesta PRAPARE (~15 filas por paciente). THEMIS solo prevé `observation` cuando hay más de una raza.
+2. **Concepto distinto:** usa LOINC 3046853 en lugar de 4013886 (0 filas).
+3. **Mapeo incompleto en `person`:** «hawaiian» (58) y «native» (38) quedan en 0 aunque existen 8557 *Native Hawaiian or Other Pacific Islander* y 8657 *American Indian or Alaska Native*. «other» (69) en 0 es aceptable. **96 personas de dos grupos minoritarios desaparecen** de cualquier análisis que filtre o estratifique por `race_concept_id`.
+
+Lo que sí cumple: **concordancia perfecta** entre tablas (4,747 coinciden, 0 discordantes, 0 con más de una raza, así que es correcto que no se use 1546847). 336 pacientes combinan una raza válida con «I choose not to answer» y tienen un solo registro en `person`, como pide THEMIS. 1,156 pacientes no tienen raza en `observation` (no hicieron la encuesta PRAPARE).
+
+**Para analizar:** la raza se toma de `person` (una fila por paciente, concepto estándar). Un JOIN con `observation` multiplica las filas por ~15 y deja fuera a 1,156 pacientes. La corrección de los 96 sin mapear iría en una tabla de `results` que conserve el original, y la solución de fondo es corregir el mapeo del ETL.
+
 ## Anexo. Checklist para reutilizar Synthea
 
 Problemas encontrados en este lab que conviene revisar cada vez que se genere una población nueva. Los laboratorios de Synthea salen de módulos JSON escritos a mano (código, unidad y regla para generar el valor), así que un error en un módulo **se repite igual en todos los pacientes**.
@@ -252,6 +279,7 @@ Problemas encontrados en este lab que conviene revisar cada vez que se genere un
 - [ ] **Plausibilidad por analito y unidad** (consulta tipo 6b o DQD). Caso real: globulina con 20,412 valores entre 2.0 y 3.5 etiquetados como g/L, que en realidad son g/dL. Es un error de origen: `unit_source_value` ya dice «g/L».
 - [ ] **Fechas de fin de las recetas.** En el CSV de Synthea el fin de una receta coincide con el inicio de la siguiente (recetas encadenadas). Además, el ETL convierte `stop` NULL en 0 días: 17,654 recetas en curso quedan con duración cero (secciones 4 y 5).
 - [ ] **Acumulación en `days_supply` ≈ 371 días** (41,980 filas): es la renovación anual de los tratamientos crónicos, no un dato clínico (sección 2).
+- [ ] **Raza sin mapear:** «hawaiian» y «native» quedan con `race_concept_id = 0` aunque existen 8557 y 8657 (96 personas, sección 9).
 - [ ] **Unidades sin mapear:** el GFR tiene `unit_concept_id = 0` aunque `unit_source_value` trae la unidad.
 - [ ] **Campos que nunca se llenan:** `operator`, `value_as_concept_id` y `range_low`/`range_high`. Algunos valores solo aparecen en `value_source_value` (p. ej., tabaquismo, LOINC 72166-2, en `observation`).
 - [ ] **Datos «demasiado limpios»:** casi una sola unidad por analito y ningún valor censurado (`<`, `>`). Un pipeline que funciona con Synthea no queda validado para datos reales.
