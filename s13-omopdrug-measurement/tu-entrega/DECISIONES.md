@@ -61,3 +61,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** comparar peso, tabaquismo y raza. La raza se contrasta entre `person` y `observation` y con la convención THEMIS sobre múltiples razas. Para analizar, la raza se toma de `person`.
 - **Alternativas:** dolor 0-10 (dato reportado por el paciente en `measurement`; descartada: THEMIS no tiene regla concreta con la que comparar); presión arterial (descartada: es un signo vital como el peso y no aporta nada nuevo); situación de vivienda (descartada: repite el patrón del tabaquismo).
 - **Por qué:** es el único hecho con una convención THEMIS específica y guardado en dos tablas, lo que permite medir la concordancia. Reveló un fallo de mapeo (96 personas de minorías con concepto 0) que se corregiría en `results` sin tocar el CDM, y de fondo en el ETL.
+
+## 13. Valor basal más cercano al índice (actividad 10)
+- **Decisión:** índice = primera receta de lisinopril; analito = creatinina (`valor_analitico` de la act. 8). Principal: ventana [−90, 0] sin valores posteriores. Contraste: ±90. Más cercano = menor |días|; en empate gana el previo; mismo día → `measurement_id DESC`.
+- **Alternativas:** presión sistólica (más cobertura, 24.7 %, pero es un signo vital y no usa la limpieza de la act. 8); potasio (misma cobertura, sin limpieza previa); DM2 + HbA1c (repetía el lab 11); estrictamente previo [−90, −1] (solo 63 pacientes, pierde el día 0); ±90 como principal (descartada: 110 valores posteriores con fuga).
+- **Por qué:** la creatinina basal es lo que se pide antes de un IECA, y el lisinopril la modifica, así que un valor posterior no es basal. Resultado: 208 de 1,522 (13.7 %) con valor y 317 (20.8 %) con ±90. Esa cobertura limita la cohorte de la sesión 17.

@@ -272,6 +272,27 @@ Lo que sí cumple: **concordancia perfecta** entre tablas (4,747 coinciden, 0 di
 
 **Para analizar:** la raza se toma de `person` (una fila por paciente, concepto estándar). Un JOIN con `observation` multiplica las filas por ~15 y deja fuera a 1,156 pacientes. La corrección de los 96 sin mapear iría en una tabla de `results` que conserve el original, y la solución de fondo es corregir el mapeo del ETL.
 
+## 10. Creatinina basal al inicio de lisinopril
+
+**Diseño** (`results.creatinina_basal`, una fila por paciente):
+- **Índice:** primera receta de lisinopril (1,522 pacientes, actividades 3-5).
+- **Analito:** creatinina, usando `valor_analitico` de la sección 8. Antes de empezar un IECA se pide la función renal, porque el fármaco puede subir la creatinina.
+- **Valor más cercano:** patrón de la sesión 11, `ROW_NUMBER()` ordenado por `abs(días)`. Si un valor previo y uno posterior empatan en distancia, gana el previo. Si hay dos el mismo día, `measurement_id DESC` (determinista, no clínico). En estos datos hay 0 empates entre un valor previo y uno posterior.
+- **Política A (principal):** días en [−90, 0]. No se aceptan valores posteriores al índice: ya reflejan el efecto del lisinopril y usarlos sería fuga de información.
+- **Política B (contraste):** días en [−90, +90].
+
+| Política | Con valor basal | Sin valor | % con valor |
+|---|---|---|---|
+| **A, [−90, 0] (principal)** | **208** | **1,314** | **13.7 %** |
+| B, [−90, +90] (contraste) | 317 | 1,205 | 20.8 % |
+
+**Lectura:**
+- En A, 157 de los 208 valores (75 %) son **del mismo día del índice**, 41 de los 30 días previos y 10 de 31-90 días antes. La «basal» es casi siempre el análisis de la consulta en la que se prescribe. **Limitación:** no se puede saber el orden dentro del mismo día.
+- B añade 110 valores **posteriores** al índice. En un paciente (1153) cambia una basal válida (1.5 mg/dL, día −15) por un valor bajo tratamiento (2.2 mg/dL, día +13) solo porque está más cerca. Es el efecto esperado de un IECA y muestra por qué B tiene fuga.
+- Los 208 valores basales están dentro del rango plausible (media 1.17, mediana 1.1 mg/dL).
+
+**Implicación para la sesión 17:** solo el **13.7 %** de los iniciadores de lisinopril tiene creatinina basal. Si la cohorte exige función renal basal, pasa de 1,522 a 208 pacientes. Las alternativas son ampliar la ventana previa (más cobertura con una basal más antigua), tratar el dato faltante como tal (imputación, categoría «sin dato») o aceptar la pérdida declarando el posible sesgo de selección.
+
 ## Anexo. Checklist para reutilizar Synthea
 
 Problemas encontrados en este lab que conviene revisar cada vez que se genere una población nueva. Los laboratorios de Synthea salen de módulos JSON escritos a mano (código, unidad y regla para generar el valor), así que un error en un módulo **se repite igual en todos los pacientes**.
