@@ -41,3 +41,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** globulina (3027970): 20,412 filas en g/L y 16 en g/dL. También será el analito que se normalice en la actividad 7.
 - **Alternativas:** temperatura (Cel 6,346 / [degF] 3; descartada: conversión de manual que solo afecta a 3 filas); troponina (pg/mL 3,078 / ng/L 219; descartada: unidades equivalentes 1:1, conversión trivial); GFR (unit 0 en 59,485 filas con texto «mL/min/{1.73_m2}» frente a mL/min 26,125; descartada: es un problema de mapeo, no de conversión).
 - **Por qué:** es la única opción con un problema de calidad real. Los valores «en g/L» (2.0-3.5) son g/dL mal etiquetados en origen (Synthea), y una conversión que se fíe de la etiqueta empeoraría los datos. Obliga a decidir la unidad por el rango del valor y a documentar la regla.
+
+## 9. Normalización de la globulina (actividad 7)
+- **Decisión:** unidad canónica g/L (SI), con la unidad real de cada fila decidida por el rango del valor (< 10 → g/dL → ×10; ≥ 10 → g/L). Factor citado de UCUM y rango normal de MedlinePlus. Tabla `results.globulina_normalizada` con valor, unidad originales y regla aplicada.
+- **Alternativas:** canónica g/dL (descartada: no es SI y la «conversión» se reduciría a cambiar la etiqueta); fiarse de la etiqueta (descartada: mezcla dos escalas, 2-3.5 y 20-40); fiarse de la etiqueta excluyendo las filas incoherentes (descartada: se pierde el 99.9 % del analito).
+- **Por qué:** la etiqueta g/L está mal en origen y el valor es la única evidencia fiable. El umbral es seguro porque las escalas no se solapan, y la regla fila a fila cubre casos futuros bien etiquetados. Conservar el original permite auditar o deshacer la corrección.

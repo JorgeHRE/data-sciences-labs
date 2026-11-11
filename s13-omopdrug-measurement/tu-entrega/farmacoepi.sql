@@ -558,3 +558,46 @@ ORDER BY mediciones DESC;
 SELECT count(*) AS textos_con_signo
 FROM cdm.measurement
 WHERE value_source_value ~ '^\s*(<|>|<=|>=)';
+
+-- =====================================================================
+-- Actividad 7a. Normalizar la globulina (3027970) a g/L (unidad canónica)
+-- Decisión 9: unidad canónica g/L (SI) y unidad REAL decidida por el rango
+-- del valor, no por la etiqueta (6b: los valores «en g/L» son g/dL).
+--   * valor < 10  → se interpreta como g/dL  → ×10
+--   * valor >= 10 → se interpreta como g/L   → ×1
+-- Umbral 10: la globulina normal es ~2.2-4.2 g/dL (suma de fracciones
+-- alfa-1, alfa-2, beta y gamma; MedlinePlus, Protein electrophoresis -
+-- serum) = 22-42 g/L. El corte cae en el hueco entre las dos escalas.
+-- Factor: UCUM, prefijo d = 10^-1 (tabla 1) y L = dm3 (tabla 5) →
+-- 1 dL = 0.1 L → 1 g/dL = 10 g/L.
+-- Se conservan valor y unidad originales, y se anota qué regla se aplicó.
+-- Los nulos se mantienen (ninguno aquí, 6b) y no se convierten.
+-- =====================================================================
+DROP TABLE IF EXISTS results.globulina_normalizada;
+CREATE TABLE results.globulina_normalizada AS
+SELECT m.measurement_id,
+       m.person_id,
+       m.measurement_date,
+       m.value_as_number                               AS valor_original,
+       m.unit_concept_id                               AS unidad_original_concept_id,
+       m.unit_source_value                             AS unidad_original_texto,
+       CASE WHEN m.value_as_number < 10 THEN 'g/dL' ELSE 'g/L' END AS unidad_inferida,
+       CASE WHEN m.value_as_number < 10 THEN m.value_as_number * 10
+            ELSE m.value_as_number END                 AS valor_g_l,
+       8636                                            AS unidad_canonica_concept_id, -- g/L
+       CASE WHEN m.value_as_number IS NULL               THEN 'sin_valor'
+            WHEN (m.value_as_number < 10) = (m.unit_concept_id = 8713)
+                                                         THEN 'etiqueta_coherente'
+            ELSE 'reetiquetada_por_rango' END            AS regla_aplicada
+FROM cdm.measurement m
+WHERE m.measurement_concept_id = 3027970;
+
+-- Verificación: filas por regla, unidad original e inferida
+-- (esperado: 20,428 en total = conteo de 6b; ninguna con valor >= 10)
+SELECT regla_aplicada, unidad_original_texto, unidad_inferida,
+       count(*)              AS filas,
+       min(valor_original)   AS min_orig,  max(valor_original) AS max_orig,
+       min(valor_g_l)        AS min_g_l,   max(valor_g_l)      AS max_g_l
+FROM results.globulina_normalizada
+GROUP BY 1, 2, 3
+ORDER BY filas DESC;

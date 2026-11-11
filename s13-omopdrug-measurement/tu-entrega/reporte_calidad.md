@@ -171,6 +171,33 @@ El 22.8 % **no son datos faltantes**, son dos casos distintos:
 
 **Valores censurados.** En esta base no hay ninguno, pero en datos reales aparecen (p. ej., «<0.01 ng/mL»). Se pueden sustituir por el límite de detección o por LD/2 (simple, con sesgo) o tratar con modelos para datos censurados (Tobit, supervivencia). En todos los casos hay que **conservar el operador**: sin él, «<0.01» queda como 0.01 y pasa por un valor medido.
 
+## 7. Normalización de unidades: globulina a g/L
+
+**Regla.** Unidad canónica **g/L** (SI). La unidad real de cada fila se decide **por el rango del valor**, no por la etiqueta (sección 6b): valor < 10 → g/dL → ×10; valor ≥ 10 → g/L → ×1. El umbral funciona porque las dos escalas no se solapan: la globulina normal es ~2.2-4.2 g/dL = 22-42 g/L. No es un método general y hay que revisarlo para cada analito.
+
+**Factor y fuentes:**
+- 1 g/dL = **10 g/L**. UCUM define el prefijo d = 10⁻¹ (tabla 1) y L = dm³ (tabla 5), de modo que 1 dL = 0.1 L. *The Unified Code for Units of Measure*, https://ucum.org/ucum (consultado el 2026-11-11).
+- Rango normal: suma de los mínimos y máximos de las fracciones alfa-1 (0.2-0.4), alfa-2 (0.6-0.9), beta (0.6-1.1) y gamma (0.8-1.8 g/dL) = 2.2-4.2 g/dL. La suma es nuestra; la fuente no da la globulina total. La misma página da cada fracción en g/dL y g/L, lo que confirma el factor ×10. MedlinePlus, *Protein electrophoresis – serum*, https://medlineplus.gov/ency/article/003540.htm (revisión 29/01/2026).
+
+**Resultado** (`results.globulina_normalizada`; conserva `valor_original`, `unidad_original_concept_id`, `unidad_original_texto` y la columna `regla_aplicada`):
+
+| Regla aplicada | Unidad original | Unidad inferida | Filas | Original | En g/L |
+|---|---|---|---|---|---|
+| reetiquetada_por_rango | g/L | g/dL | 20,412 | 2.0-3.5 | 20-35 |
+| etiqueta_coherente | g/dL | g/dL | 16 | 2.0-4.0 | 20-40 |
+
+**Filas convertidas: 20,428** (100 % del analito, 0 nulos). De ellas, **20,412 se reetiquetaron**. La regla se aplica fila a fila: un valor ≥ 10 bien etiquetado en g/L no se tocaría.
+
+![Antes y después](figura_globulina.png)
+
+*`figura_globulina.py`. Eje Y logarítmico y bins con la resolución de los datos (0.1 antes, 1 después).*
+
+**Lectura de la figura.**
+- **Antes:** las dos etiquetas caen en 2-4, lejos de la banda donde estarían valores reales en g/L.
+- **Después:** una sola escala, 20-40 g/L.
+- La distribución es **plana** (~1,350 mediciones por cada valor entero de 21 a 34), no una campana. Parece que Synthea genera el valor de forma uniforme en un rango fijo, así que los datos sirven para practicar la normalización, no para describir la globulina de una población.
+- ~700 filas en 20 g/L quedan por debajo de 22. Se revisan en la sección 8: los rangos de referencia varían entre laboratorios.
+
 ## Anexo. Checklist para reutilizar Synthea
 
 Problemas encontrados en este lab que conviene revisar cada vez que se genere una población nueva. Los laboratorios de Synthea salen de módulos JSON escritos a mano (código, unidad y regla para generar el valor), así que un error en un módulo **se repite igual en todos los pacientes**.
