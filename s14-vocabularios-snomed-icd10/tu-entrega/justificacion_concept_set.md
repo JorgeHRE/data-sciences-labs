@@ -134,3 +134,35 @@ La versión B tiene 14 descendientes (menos de 20), así que se revisaron todos.
 **Falsos positivos:** 3 de 14 en B (dos de embarazo y uno de remisión) y 0 de 20 en la muestra de la rama. La muestra limpia respalda que la rama es homogénea: todos sus conceptos son «X due to type 2 diabetes» y presuponen la enfermedad. Por eso no se revisaron los 118 completos; se habría hecho si la muestra hubiera encontrado algún falso positivo.
 
 **Exclusiones que pasan a la versión C** (cada una con sus descendientes): `43531010`, `4129519` y `45766052`. C pasa de 134 a 131 conceptos. Ningún paciente de esta base tiene esos conceptos, así que la cohorte sigue en 1,085; la definición cambia aunque esta base no lo refleje.
+
+## 7. Decisiones del concept set final (versión C)
+
+Una fila por cada concepto excluido y por cada inclusión que no es obvia. Las razones se dan en términos de la pregunta de investigación: describir el uso de la metformina en pacientes con T2DM.
+
+| concept_id | nombre | incluido | por qué |
+|---|---|---|---|
+| 43531010 | Pre-existing type 2 diabetes mellitus in pregnancy | **no** | Durante el embarazo el tratamiento de elección es la insulina: la paciente suspende la metformina por motivos obstétricos, y eso se leería como falta de persistencia. Es una población con manejo y seguimiento distintos. |
+| 4129519 | Pregnancy and type 2 diabetes mellitus | **no** | Mismo motivo: describe la diabetes en el contexto del embarazo. Se excluye con sus descendientes. |
+| 45766052 | Type 2 diabetes mellitus in remission | **no** | Sin enfermedad activa no hay indicación de tratamiento: estos pacientes no son candidatos a metformina y bajarían artificialmente su uso. El código ICD-10-CM E11.A mapea solo a este concepto. |
+| 443732 (+118 descendientes) | Disorder due to type 2 diabetes mellitus | **sí** | Las complicaciones «due to type 2 diabetes» (nefropatía, retinopatía, neuropatía, pie diabético…) presuponen la enfermedad. En SNOMED no cuelgan de 201826, sino de este concepto hermano; sin él se perderían pacientes cuyo diagnóstico solo consta como complicación. Ver la advertencia del párrafo final sobre esta base. |
+| 4130162 | Insulin treated type 2 diabetes mellitus | **sí** | Es T2DM; muchos pacientes con insulina siguen tomando metformina. Excluirlos dejaría una cohorte de casos leves. |
+| 4063043 | Pre-existing type 2 diabetes mellitus | **sí** | Aunque el término se use en contexto obstétrico, afirma que el paciente tiene T2DM. Lo que describe el embarazo es su hijo `43531010`, que sí se excluye. |
+| 45757508 | Type 2 diabetes mellitus controlled by diet | **sí** | Son pacientes con T2DM sin fármacos: justo los candidatos a iniciar metformina, y el inicio es parte de la pregunta. |
+
+**Conceptos considerados que no se añadieron** (aparecieron como destinos de códigos ICD-10-CM en la actividad 3):
+
+| concept_id | nombre | incluido | por qué |
+|---|---|---|---|
+| 201820 | Diabetes mellitus | no | Es el padre de la semilla: incluye la diabetes tipo 1, la gestacional y la secundaria, que tienen otra fisiopatología y otro tratamiento. |
+| 442793 | Complication due to diabetes mellitus | no | No especifica el tipo de diabetes. |
+| 4239938 | First trimester pregnancy | no | Describe un embarazo, no una diabetes: metería a cualquier embarazada. |
+| 37018196 | Prediabetes | no | Es otra entidad, sin diagnóstico de diabetes. |
+| 46272450 | Long-term current use of drug therapy | no | Observación sobre un tratamiento, de dominio Observation; no identifica la enfermedad. |
+
+### Sensibilidad y valor predictivo positivo
+
+La **sensibilidad** es la fracción de pacientes con T2DM que la definición captura; el **valor predictivo positivo (VPP)** es la fracción de pacientes capturados que de verdad tienen T2DM. Para la pregunta de este trabajo, el uso de metformina, el error que más daña es el **falso positivo**: un paciente sin T2DM en la cohorte nunca recibirá metformina por esa causa y hace parecer más bajo el uso del fármaco. Un falso negativo solo reduce el tamaño de la cohorte, y la descripción de los pacientes incluidos sigue siendo válida, siempre que los casos perdidos no se diferencien en su tratamiento.
+
+Sobre el papel, la versión C está pensada para **subir la sensibilidad sin perder VPP**: añade la rama de complicaciones, que en una base real presupone T2DM, y excluye solo las formas en las que el tratamiento cambia por razones ajenas a la conducta que se quiere medir (embarazo) o en las que no hay enfermedad activa (remisión). Sus pérdidas de sensibilidad son deliberadas (embarazadas con T2DM) o están fuera del alcance de un concept set de diagnósticos: pacientes con T2DM documentada solo por el laboratorio (HbA1c) o por el fármaco, o con códigos fuente retirados que no mapean (como E11.640).
+
+En esta base, sin embargo, la definición **tiende a meter casos que no son**. Los 641 pacientes que entran solo por la rama de complicaciones no se comportan como diabéticos tipo 2: ninguno toma metformina (los 231 usuarios están todos en la versión A), 402 tienen además el código de prediabetes, 402 usan insulina y solo 1 de 441 con dato tiene alguna HbA1c ≥ 6.5 % (actividad 7a, en `concept_set.sql`). Parece un artefacto de cómo Synthea genera las complicaciones, no un fallo del vocabulario. Su efecto en la pregunta es grande: el porcentaje de pacientes con metformina pasaría del 52 % (231/444) con la versión A al 21 % (231/1,085) con la C. El concept set se mantiene, porque es correcto para una base real. Para la cohorte de la sesión 17 propongo no fiarse de un solo código: exigir además una segunda evidencia (un antidiabético o una HbA1c ≥ 6.5 %), que es como se construyen los fenotipos validados de OHDSI. Con datos reales, el VPP se mediría revisando una muestra de historias clínicas o con PheValuator; en Synthea no hay historia que revisar, así que esta evidencia indirecta es lo único disponible.
