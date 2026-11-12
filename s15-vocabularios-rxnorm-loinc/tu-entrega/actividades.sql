@@ -371,3 +371,100 @@ FROM candidatos k
 LEFT JOIN cdm.concept c ON c.vocabulary_id = 'LOINC' AND c.concept_code = k.loinc
 LEFT JOIN med m         ON m.measurement_concept_id = c.concept_id
 ORDER BY k.decision DESC, mediciones DESC, k.loinc;
+
+
+-- =====================================================================
+-- Actividad 7. Auditoría de unidades (decisión 9: analitos completos)
+-- =====================================================================
+-- Actividad 7a. Tabla por analito: unidades distintas, % sin unidad
+-- (unit_concept_id = 0 o NULL) y, de paso, % sin valor numérico.
+-- La CTE «codigos» asigna cada concepto a su analito; HbA1c usa los 8
+-- códigos del concept set de la actividad 6 (en la base solo aporta 4548-4).
+-- JOIN codigos ↔ measurement: codigos tiene 1 fila por concepto, así que no
+-- multiplica; el total debe ser 58,969 + 2·49,484 + 2·69,106 = 296,149.
+-- Orden lógico: FROM/JOIN → WHERE → GROUP BY analito → SELECT (los FILTER y
+-- count DISTINCT se calculan dentro de cada analito) → ORDER BY.
+WITH codigos (analito, loinc) AS (
+    VALUES ('HbA1c', '4548-4'), ('HbA1c', '17856-6'), ('HbA1c', '4549-2'),
+           ('HbA1c', '62388-4'), ('HbA1c', '17855-8'), ('HbA1c', '96595-4'),
+           ('HbA1c', '59261-8'), ('HbA1c', '71875-9'),
+           ('Glucosa', '2345-7'), ('Glucosa', '2339-0'),
+           ('Creatinina', '2160-0'), ('Creatinina', '38483-4')
+)
+SELECT k.analito,
+       count(*)                                         AS mediciones,
+       count(DISTINCT m.measurement_concept_id)         AS codigos_en_uso,
+       count(DISTINCT m.unit_concept_id)                AS unidades_distintas,
+       string_agg(DISTINCT u.concept_code, ', ')        AS unidades,
+       round(100.0 * count(*) FILTER (WHERE coalesce(m.unit_concept_id, 0) = 0)
+             / count(*), 2)                             AS pct_sin_unidad,
+       round(100.0 * count(*) FILTER (WHERE m.value_as_number IS NULL)
+             / count(*), 2)                             AS pct_sin_valor
+FROM codigos k
+JOIN cdm.concept c      ON c.vocabulary_id = 'LOINC' AND c.concept_code = k.loinc
+JOIN cdm.measurement m  ON m.measurement_concept_id = c.concept_id
+LEFT JOIN cdm.concept u ON u.concept_id = m.unit_concept_id   -- LEFT: no perder filas con unidad 0/NULL
+GROUP BY k.analito
+ORDER BY k.analito;
+
+-- Actividad 7b. Datos crudos para los histogramas (los lee figura_unidades.py).
+-- Granularidad: 1 fila por medición (296,149 filas). Mismo JOIN que 7a; aquí
+-- no se agrega porque el histograma necesita cada valor.
+WITH codigos (analito, loinc) AS (
+    VALUES ('HbA1c', '4548-4'), ('HbA1c', '17856-6'), ('HbA1c', '4549-2'),
+           ('HbA1c', '62388-4'), ('HbA1c', '17855-8'), ('HbA1c', '96595-4'),
+           ('HbA1c', '59261-8'), ('HbA1c', '71875-9'),
+           ('Glucosa', '2345-7'), ('Glucosa', '2339-0'),
+           ('Creatinina', '2160-0'), ('Creatinina', '38483-4')
+)
+SELECT k.analito, k.loinc, s.concept_name AS system,
+       coalesce(u.concept_code, '(sin unidad)') AS unidad,
+       m.value_as_number AS valor
+FROM codigos k
+JOIN cdm.concept c      ON c.vocabulary_id = 'LOINC' AND c.concept_code = k.loinc
+JOIN cdm.concept_relationship r ON r.concept_id_1 = c.concept_id
+                               AND r.relationship_id = 'Has system' AND r.invalid_reason IS NULL
+JOIN cdm.concept s      ON s.concept_id = r.concept_id_2
+JOIN cdm.measurement m  ON m.measurement_concept_id = c.concept_id
+LEFT JOIN cdm.concept u ON u.concept_id = m.unit_concept_id;
+
+-- Actividad 7c. ¿La moda alta de creatinina en sangre (38483-4) es ERC?
+-- Decisión 10: estadio de ERC «a la fecha» de cada medición.
+-- dx: 1 fila por (persona, estadio) con la fecha del primer diagnóstico de ese
+-- estadio (2,572 filas). La subconsulta correlacionada busca, para cada medición,
+-- el estadio más alto con fecha <= fecha de la medición; es aceptable (~8 s)
+-- porque dx es pequeña. coalesce(…, 0) = sin ERC diagnosticada a esa fecha.
+-- OJO: dx va MATERIALIZED. Postgres (≥ 12) «pega» dentro de la consulta una CTE
+-- que se usa una sola vez; sin MATERIALIZED, recalculaba dx (barriendo
+-- condition_occurrence) por cada una de las 69,106 mediciones y no terminaba.
+-- No es un JOIN, así que no puede multiplicar filas: la suma de mediciones
+-- debe ser 69,106. Esperado: mediana ~1.1 sin ERC, ~3.1-3.6 en estadios 3-4,
+-- y las 232 mediciones ≥ 40 mg/dL todas en estadio 4.
+-- La columna de suero de act7_unidades.md sale de esta misma consulta cambiando
+-- 3051825 por 3016723 (2160-0): mediana ~2 en todos los estadios.
+WITH estadio (concept_id, estadio) AS (
+    VALUES (443614, 1), (443601, 2), (443597, 3), (443612, 4), (193782, 5)  -- 5 = ERC terminal
+),
+dx AS MATERIALIZED (
+    SELECT co.person_id, e.estadio, min(co.condition_start_date) AS fecha
+    FROM cdm.condition_occurrence co
+    JOIN estadio e ON e.concept_id = co.condition_concept_id
+    GROUP BY co.person_id, e.estadio
+),
+cre AS (
+    SELECT m.person_id, m.measurement_date, m.value_as_number AS valor,
+           coalesce((SELECT max(dx.estadio) FROM dx
+                     WHERE dx.person_id = m.person_id
+                       AND dx.fecha <= m.measurement_date), 0) AS estadio_a_la_fecha
+    FROM cdm.measurement m
+    WHERE m.measurement_concept_id = 3051825          -- 38483-4, creatinina en sangre
+)
+SELECT estadio_a_la_fecha,
+       count(*)                                                AS mediciones,
+       count(DISTINCT person_id)                               AS pacientes,
+       round(100.0 * count(*) FILTER (WHERE valor < 1.6) / count(*), 1) AS pct_moda_baja,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY valor)      AS mediana,
+       count(*) FILTER (WHERE valor >= 40)                     AS ge_40
+FROM cre
+GROUP BY estadio_a_la_fecha
+ORDER BY estadio_a_la_fecha;
