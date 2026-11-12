@@ -1,0 +1,8 @@
+# Lab 15 — entorno para gráficas e histogramas (consultas a Postgres del lab 12)
+pandas
+jupysql
+sqlalchemy
+psycopg2-binary
+matplotlib
+jupyter
+python-dotenv
