@@ -327,3 +327,47 @@ SELECT glu_sangre, cre_sangre, glu_suero, cre_suero,
 FROM dia
 GROUP BY glu_sangre, cre_sangre, glu_suero, cre_suero
 ORDER BY persona_dias DESC;
+
+
+-- =====================================================================
+-- Actividad 6. Concept set de HbA1c
+-- =====================================================================
+-- Actividad 6a. Los 10 candidatos (Component «Hemoglobin A1c…») con la
+-- decisión 8, cruzados con el vocabulario y con measurement.
+-- Se parte de la lista (VALUES) y no de measurement: con LEFT JOIN, los
+-- códigos sin mediciones salen con 0 en vez de desaparecer.
+-- measurement se agrega UNA vez (CTE med) antes del JOIN → 1 fila por concepto,
+-- así el JOIN no multiplica: 10 filas de lista → 10 filas de resultado.
+-- Esperado: 10 filas, todas encontradas y estándar ('S'); solo 4548-4 con
+-- mediciones (58,969 / 2,565 pac); 8 'incluir' y 2 'excluir'.
+WITH candidatos (loinc, decision, conversion, motivo) AS (
+    VALUES ('4548-4',  'incluir', NULL,              'HbA1c, cualquier método'),
+           ('17856-6', 'incluir', NULL,              'por HPLC'),
+           ('4549-2',  'incluir', NULL,              'por electroforesis'),
+           ('62388-4', 'incluir', NULL,              'protocolo JDS/JSCC'),
+           ('17855-8', 'incluir', NULL,              'calculada'),
+           ('96595-4', 'incluir', NULL,              'gota de sangre seca (DBS)'),
+           ('59261-8', 'incluir', '0.0915·x + 2.15', 'IFCC, mmol/mol'),
+           ('71875-9', 'incluir', 'x · 100',         'fracción decimal'),
+           ('86910-7', 'excluir', NULL,              'meta (goal), no es medición'),
+           ('41995-2', 'excluir', NULL,              'masa/volumen, depende de la Hb total')
+),
+med AS (
+    SELECT measurement_concept_id,
+           count(*)                  AS mediciones,
+           count(DISTINCT person_id) AS pacientes
+    FROM cdm.measurement
+    WHERE measurement_concept_id IN (
+        SELECT concept_id FROM cdm.concept
+        WHERE vocabulary_id = 'LOINC'
+          AND concept_code IN (SELECT loinc FROM candidatos))
+    GROUP BY measurement_concept_id
+)
+SELECT k.loinc, c.concept_id, c.standard_concept AS s, k.decision,
+       k.conversion, k.motivo,
+       coalesce(m.mediciones, 0) AS mediciones,
+       coalesce(m.pacientes, 0)  AS pacientes
+FROM candidatos k
+LEFT JOIN cdm.concept c ON c.vocabulary_id = 'LOINC' AND c.concept_code = k.loinc
+LEFT JOIN med m         ON m.measurement_concept_id = c.concept_id
+ORDER BY k.decision DESC, mediciones DESC, k.loinc;
