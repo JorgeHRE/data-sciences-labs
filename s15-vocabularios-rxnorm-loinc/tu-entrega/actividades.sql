@@ -440,7 +440,7 @@ LEFT JOIN cdm.concept u ON u.concept_id = m.unit_concept_id;
 -- No es un JOIN, así que no puede multiplicar filas: la suma de mediciones
 -- debe ser 69,106. Esperado: mediana ~1.1 sin ERC, ~3.1-3.6 en estadios 3-4,
 -- y las 232 mediciones ≥ 40 mg/dL todas en estadio 4.
--- La columna de suero de act7_unidades.md sale de esta misma consulta cambiando
+-- La columna de suero de auditoria_unidades.md sale de esta misma consulta cambiando
 -- 3051825 por 3016723 (2160-0): mediana ~2 en todos los estadios.
 WITH estadio (concept_id, estadio) AS (
     VALUES (443614, 1), (443601, 2), (443597, 3), (443612, 4), (193782, 5)  -- 5 = ERC terminal
