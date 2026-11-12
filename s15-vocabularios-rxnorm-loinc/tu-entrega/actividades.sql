@@ -170,3 +170,51 @@ SELECT c.vocabulary_id, s.drug_concept_id, left(c.concept_name, 60) AS nombre,
 FROM sin_atc s
 JOIN cdm.concept c ON c.concept_id = s.drug_concept_id
 ORDER BY c.vocabulary_id DESC, s.filas DESC;
+
+-- Actividad 4a. «Exposición a metformina» en tres versiones (decisión 6).
+--   A = descendientes estándar de metformina con UN solo ingrediente
+--   B = todos los descendientes estándar (combinaciones incluidas)
+--   C = B menos los que contienen un ingrediente de la clase ATC A10BK
+--       (iSGLT2); exclusión por jerarquía, no por lista de nombres.
+-- Solo standard_concept = 'S': los Dose Group ('C') no aparecen en
+-- drug_exposure. El propio ingrediente entra (nivel 0, decisión 4).
+-- Granularidad de cs: 1 fila por (versión, concept_id).
+-- Esperado: A 83 / B 400 / C 249 conceptos; 231 pacientes en las tres.
+WITH b AS (
+    SELECT c.concept_id
+    FROM cdm.concept_ancestor a
+    JOIN cdm.concept c ON c.concept_id = a.descendant_concept_id
+    WHERE a.ancestor_concept_id = 1503297          -- metformin (RxCUI 6809)
+      AND c.standard_concept = 'S'
+),
+n_ingr AS (     -- cuántos ingredientes tiene cada concepto de B
+    SELECT b.concept_id, count(*) AS n
+    FROM b
+    JOIN cdm.concept_ancestor a ON a.descendant_concept_id = b.concept_id
+    JOIN cdm.concept i ON i.concept_id = a.ancestor_concept_id
+    WHERE i.vocabulary_id = 'RxNorm' AND i.concept_class_id = 'Ingredient'
+    GROUP BY b.concept_id
+),
+isglt2 AS (     -- conceptos con algún ingrediente de ATC A10BK
+    SELECT DISTINCT a2.descendant_concept_id AS concept_id
+    FROM cdm.concept atc
+    JOIN cdm.concept_ancestor a1 ON a1.ancestor_concept_id = atc.concept_id
+    JOIN cdm.concept i ON i.concept_id = a1.descendant_concept_id
+                      AND i.vocabulary_id = 'RxNorm' AND i.concept_class_id = 'Ingredient'
+    JOIN cdm.concept_ancestor a2 ON a2.ancestor_concept_id = i.concept_id
+    WHERE atc.vocabulary_id = 'ATC' AND atc.concept_code = 'A10BK'
+),
+cs AS (
+    SELECT 'A' AS version, concept_id FROM n_ingr WHERE n = 1
+    UNION ALL SELECT 'B', concept_id FROM b
+    UNION ALL SELECT 'C', concept_id FROM b
+              WHERE concept_id NOT IN (SELECT concept_id FROM isglt2)
+)
+SELECT cs.version,
+       count(*) AS conceptos,
+       (SELECT count(DISTINCT de.person_id) FROM cdm.drug_exposure de
+        WHERE de.drug_concept_id IN (SELECT concept_id FROM cs c2
+                                     WHERE c2.version = cs.version)) AS pacientes
+FROM cs
+GROUP BY cs.version
+ORDER BY cs.version;
