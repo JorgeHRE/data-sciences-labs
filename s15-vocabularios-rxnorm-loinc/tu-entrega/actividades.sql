@@ -51,3 +51,45 @@ SELECT ingrediente, rxcui, concept_class_id,
 FROM ligados
 GROUP BY ingrediente, rxcui, concept_class_id
 ORDER BY ingrediente, concept_class_id DESC;
+
+-- Actividad 2. Los 20 drug_concept_id más frecuentes y su(s) ingrediente(s).
+-- Decisión 3: «frecuente» = filas de drug_exposure (se añade pacientes).
+-- Decisión 4: ancestros de clase Ingredient INCLUIDO el nivel 0, con
+-- LEFT JOIN para que las vacunas (sin ingrediente) no desaparezcan.
+-- Granularidad: top20 = 1 fila por producto; con_ingr = 1 fila por
+-- (producto, ingrediente), así que las combinaciones MULTIPLICAN filas;
+-- el GROUP BY final vuelve a 1 fila por producto (string_agg los junta).
+-- Control de filas: top20 20 → con_ingr 23 (20 + 3 segundos ingredientes
+-- de las combinaciones) → resultado 20. Esperado: 2 productos con 0
+-- ingredientes (vacunas CVX), 15 con 1 y 3 con 2.
+WITH top20 AS (
+    SELECT drug_concept_id,
+           count(*)                  AS filas,
+           count(DISTINCT person_id) AS pacientes
+    FROM cdm.drug_exposure
+    GROUP BY drug_concept_id
+    ORDER BY filas DESC, drug_concept_id   -- desempate fijo y reproducible
+    LIMIT 20
+),
+ingr AS (   -- pares (concepto, ingrediente); nivel 0 incluido (decisión 4)
+    SELECT a.descendant_concept_id, i.concept_name AS ingrediente
+    FROM cdm.concept_ancestor a
+    JOIN cdm.concept i ON i.concept_id = a.ancestor_concept_id
+    WHERE i.vocabulary_id = 'RxNorm' AND i.concept_class_id = 'Ingredient'
+),
+con_ingr AS (
+    -- Un solo LEFT JOIN, contra los pares ya filtrados. Si se hiciera
+    -- LEFT JOIN a concept_ancestor y luego a concept, entrarían TODOS los
+    -- ancestros (formas, clases ATC…) como filas con ingrediente NULL.
+    SELECT t.*, g.ingrediente
+    FROM top20 t
+    LEFT JOIN ingr g ON g.descendant_concept_id = t.drug_concept_id
+)
+SELECT c.drug_concept_id, left(p.concept_name, 60) AS nombre, p.concept_class_id,
+       c.filas, c.pacientes,
+       count(c.ingrediente)                                    AS n_ingredientes,
+       string_agg(c.ingrediente, ' + ' ORDER BY c.ingrediente) AS ingredientes
+FROM con_ingr c
+JOIN cdm.concept p ON p.concept_id = c.drug_concept_id
+GROUP BY c.drug_concept_id, p.concept_name, p.concept_class_id, c.filas, c.pacientes
+ORDER BY c.filas DESC;
