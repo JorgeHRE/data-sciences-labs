@@ -21,3 +21,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** buscar los ancestros de clase `Ingredient` en `concept_ancestor` **incluido** el nivel 0 (`min_levels_of_separation = 0`), con `LEFT JOIN`.
 - **Alternativas:** exigir `min_levels_of_separation >= 1` (descartada: pierde los registros cuyo concepto ya es un ingrediente; 84 filas en la base) o usar la relación directa «RxNorm has ing» (descartada: depende de la clase del producto).
 - **Por qué:** si el concepto ya es un ingrediente, se encuentra a sí mismo y no se pierde. El `LEFT JOIN` deja visibles los productos sin ingrediente (las vacunas CVX) con el ingrediente vacío; un `JOIN` los borraría y el top-20 quedaría en 18 sin avisar.
+
+## 5. Alcance de la clase ATC A10B (actividad 3)
+- **Decisión:** usar A10B tal como la define ATC («Blood glucose lowering drugs, excl. insulins»), con todo lo que cuelga de ella, incluidos los inyectables no insulínicos (análogos de GLP-1, pramlintida, tirzepatida).
+- **Alternativas:** quitar las subclases inyectables, como A10BJ (descartada: la vía es una propiedad del producto, no de la clase; quitar A10BJ elimina también la semaglutida oral) o filtrar los productos por forma farmacéutica oral (descartada por ahora: añade un filtro fuera de la jerarquía; se aplicaría en la sesión 17 si la pregunta fuera solo sobre orales).
+- **Por qué:** es la definición estándar y reproducible: otro equipo que diga «A10B» obtiene lo mismo. El enunciado la llama «hipoglucemiantes orales», lo cual es inexacto, y se declara en el informe. En la base no cambia nada: los 2 pacientes con liraglutida también toman metformina (231 pacientes con cualquiera de las tres opciones).
