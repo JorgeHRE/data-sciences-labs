@@ -93,3 +93,80 @@ FROM con_ingr c
 JOIN cdm.concept p ON p.concept_id = c.drug_concept_id
 GROUP BY c.drug_concept_id, p.concept_name, p.concept_class_id, c.filas, c.pacientes
 ORDER BY c.filas DESC;
+
+-- Actividad 3a. De la clase ATC A10B a los ingredientes, a los productos
+-- de la base y a los pacientes. Decisión 5: A10B tal cual (incluye GLP-1
+-- inyectables).
+-- Camino: ATC A10B ─concept_ancestor→ Ingredient RxNorm ─concept_ancestor→
+-- productos (drug_concept_id) que aparecen en drug_exposure.
+-- Los productos de la base se calculan primero con DISTINCT (drug_exposure
+-- no tiene índice en drug_concept_id; ver paso 0c). Un producto combinado
+-- podría colgar de dos ingredientes de A10B y salir dos veces en el JOIN:
+-- por eso todo se cuenta con count(DISTINCT …).
+-- Esperado: 42 ingredientes · 2 productos en la base (metformina ER
+-- 500 mg y liraglutida) · 231 pacientes (los 2 de liraglutida también
+-- toman metformina).
+WITH a10b_ingr AS (
+    SELECT DISTINCT i.concept_id, i.concept_name
+    FROM cdm.concept atc
+    JOIN cdm.concept_ancestor a ON a.ancestor_concept_id = atc.concept_id
+    JOIN cdm.concept i          ON i.concept_id = a.descendant_concept_id
+    WHERE atc.vocabulary_id = 'ATC' AND atc.concept_code = 'A10B'
+      AND i.vocabulary_id = 'RxNorm' AND i.concept_class_id = 'Ingredient'
+),
+productos_base AS (
+    SELECT DISTINCT drug_concept_id FROM cdm.drug_exposure
+),
+a10b_prod AS (          -- 1 fila por (ingrediente A10B, producto de la base)
+    SELECT g.concept_name AS ingrediente, p.drug_concept_id
+    FROM a10b_ingr g
+    JOIN cdm.concept_ancestor a ON a.ancestor_concept_id = g.concept_id
+    JOIN productos_base p       ON p.drug_concept_id = a.descendant_concept_id
+)
+SELECT (SELECT count(*) FROM a10b_ingr)                 AS ingredientes,
+       (SELECT count(DISTINCT drug_concept_id) FROM a10b_prod) AS productos_base,
+       (SELECT count(DISTINCT de.person_id)
+        FROM cdm.drug_exposure de
+        WHERE de.drug_concept_id IN (SELECT drug_concept_id FROM a10b_prod))
+                                                         AS pacientes,
+       (SELECT string_agg(DISTINCT ingrediente, ', ') FROM a10b_prod)
+                                                         AS ingredientes_en_base;
+
+-- Actividad 3b. Productos de la base SIN ningún ancestro ATC.
+-- Por qué: cualquier selección por clase ATC (A10B u otra) los pierde sin
+-- avisar; el enunciado pide contarlos porque ese número es parte del
+-- resultado. Patrón de «detectar ausencias» (paso 0a): se parte de lo que
+-- debería estar (los productos de la base) y se pregunta con NOT EXISTS si
+-- tienen ancestro ATC. NOT EXISTS no multiplica filas.
+-- Las filas y pacientes de cada producto se agregan una sola vez (CTE
+-- uso); el JOIN con concept no multiplica (concept_id es clave primaria).
+-- Esperado: 22 de 365 productos = 19 vacunas CVX + 3 RxNorm (pancreatina,
+-- levalbuterol inhalador, parche de etinilestradiol/norelgestromina).
+-- En conjunto: 79,158 de 467,590 filas (16.9 %) y 5,896 pacientes
+-- distintos; las 3 RxNorm suman solo 268 filas. Ninguno es antidiabético:
+-- a la selección A10B no le quitan nada, pero a una clase de vacunas
+-- (ATC J07) le quitarían todo.
+WITH uso AS (
+    SELECT drug_concept_id,
+           count(*)                  AS filas,
+           count(DISTINCT person_id) AS pacientes
+    FROM cdm.drug_exposure
+    GROUP BY drug_concept_id
+),
+sin_atc AS (
+    SELECT u.*
+    FROM uso u
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM cdm.concept_ancestor a
+        JOIN cdm.concept x ON x.concept_id = a.ancestor_concept_id
+        WHERE a.descendant_concept_id = u.drug_concept_id
+          AND x.vocabulary_id = 'ATC')
+)
+SELECT c.vocabulary_id, s.drug_concept_id, left(c.concept_name, 60) AS nombre,
+       s.filas, s.pacientes,
+       -- peso de cada producto sobre el total de drug_exposure
+       round(100.0 * s.filas / (SELECT sum(filas) FROM uso), 2) AS pct_filas
+FROM sin_atc s
+JOIN cdm.concept c ON c.concept_id = s.drug_concept_id
+ORDER BY c.vocabulary_id DESC, s.filas DESC;
