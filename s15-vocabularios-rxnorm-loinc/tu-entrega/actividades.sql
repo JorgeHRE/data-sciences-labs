@@ -468,3 +468,84 @@ SELECT estadio_a_la_fecha,
 FROM cre
 GROUP BY estadio_a_la_fecha
 ORDER BY estadio_a_la_fecha;
+
+
+-- =====================================================================
+-- Actividad 8. Mapear un catálogo local (decisiones 11 y 12)
+-- =====================================================================
+-- Actividad 8a. Búsqueda de candidatos. Cada clave lleva el patrón con el
+-- nombre que tendría en RxNorm: la traducción (HCTZ → hydrochlorothiazide,
+-- glibenclamida → glyburide, metamizol → dipyrone) es el mapeo en sí y queda
+-- escrita aquí. Solo Clinical Drug estándar y vigente (regla «alta», decisión 12).
+-- LEFT JOIN: una clave sin candidatos sale con 0, no desaparece.
+-- Granularidad: 1 fila por clave (string_agg colapsa los candidatos).
+-- Esperado: 15 filas; 1 candidato en 12 claves; 0 en FH-0113 (diclofenaco +
+-- complejo B) y FH-0115 (gasa); FH-0107 con 2: el comodín de «%Oral Capsule»
+-- también atrapa omeprazol + bicarbonato de sodio (otro producto, otra combinación).
+-- Se deja así a propósito: un patrón laxo trae candidatos plausibles pero
+-- incorrectos, y la elección final (8b) la hace una persona.
+WITH catalogo (clave, descripcion, patron) AS (
+    VALUES
+    ('FH-0101', 'PARACETAMOL TAB 500MG C/10',            'acetaminophen 500 MG Oral Tablet'),
+    ('FH-0102', 'HCTZ TAB 25MG C/30',                    'hydrochlorothiazide 25 MG Oral Tablet'),
+    ('FH-0103', 'METFORMINA CLORH TAB 850MG C/30',       'metformin hydrochloride 850 MG Oral Tablet'),
+    ('FH-0104', 'GLIBENCLAMIDA TAB 5MG C/50',            'glyburide 5 MG Oral Tablet'),
+    ('FH-0105', 'LOSARTAN POT TAB 50MG C/30',            'losartan potassium 50 MG Oral Tablet'),
+    ('FH-0106', 'ENALAPRIL MAL TAB 10MG C/30',           'enalapril maleate 10 MG Oral Tablet'),
+    ('FH-0107', 'OMEPRAZOL CAP 20MG C/14',               'omeprazole 20 MG%Oral Capsule'),
+    ('FH-0108', 'KETOROLACO TROMET SOL INY 30MG/1ML AMP','ketorolac tromethamine 30 MG/ML Injectable Solution'),
+    ('FH-0109', 'METAMIZOL SOD SOL INY 1G/2ML AMP',      'dipyrone 500 MG/ML Injectable Solution'),   -- 1 g/2 mL = 500 mg/mL
+    ('FH-0110', 'TMP/SMX TAB 80/400MG',                  'sulfamethoxazole 400 MG / trimethoprim 80 MG Oral Tablet'),
+    ('FH-0111', 'AMOXI/AC CLAV SUSP 400/57MG/5ML 70ML',  'amoxicillin 80 MG/ML / clavulanate 11.4 MG/ML Oral Suspension'),  -- ÷ 5 mL
+    ('FH-0112', 'BUTILHIOSCINA/METAMIZOL SOL INY 20MG/2.5G/5ML', 'dipyrone 500 MG/ML /%scopolamine 4 MG/ML Injectable Solution'),
+    ('FH-0113', 'DICLOFENACO/COMPLEJO B TAB 50MG',       '%diclofenac%thiamine%'),
+    ('FH-0114', 'SOL HARTMANN 1000ML',                   'calcium chloride 0.2 MG/ML / potassium chloride 0.3 MG/ML / sodium chloride 6 MG/ML / sodium lactate 3.1 MG/ML Injectable Solution'),
+    ('FH-0115', 'GASA SECA EST 10X10CM C/200',           '%gauze%')
+)
+SELECT k.clave, k.descripcion,
+       count(c.concept_id)                                         AS candidatos,
+       string_agg(c.concept_id || ' ' || c.concept_name, ' | ')    AS cuales
+FROM catalogo k
+LEFT JOIN cdm.concept c ON c.concept_name ILIKE k.patron
+                       AND c.vocabulary_id = 'RxNorm'
+                       AND c.concept_class_id = 'Clinical Drug'
+                       AND c.standard_concept = 'S'
+                       AND c.invalid_reason IS NULL
+GROUP BY k.clave, k.descripcion
+ORDER BY k.clave;
+
+-- Actividad 8b. Tabla final de mapeo (→ mapeo_catalogo_local.csv).
+-- concept_id, confianza y justificación son la decisión humana; concept_name
+-- NO se teclea: sale de cdm.concept, así un id mal escrito se delata solo.
+-- Controles: estandar_vigente (todo 'sí' salvo el 0) y dominio (todo Drug
+-- salvo el 0 = «No matching concept», convención OMOP para no mapeado).
+-- JOIN 1 a 1 por concept_id (clave primaria): 15 filas antes y después.
+-- Esperado: 11 alta, 3 dudosa, 1 no mapeable → 73.3 % alta.
+WITH mapeo (clave_local, descripcion_local, concept_id, confianza, quien_y_por_que) AS (
+    VALUES
+    ('FH-0101', 'PARACETAMOL TAB 500MG C/10',  19020053, 'alta', 'JorgeHRE 2026-11-12: paracetamol = acetaminophen (DCI vs USAN); dosis y forma exactas.'),
+    ('FH-0102', 'HCTZ TAB 25MG C/30',          19078106, 'alta', 'JorgeHRE 2026-11-12: HCTZ = hydrochlorothiazide; dosis y forma exactas.'),
+    ('FH-0103', 'METFORMINA CLORH TAB 850MG C/30', 40164946, 'alta', 'JorgeHRE 2026-11-12: CLORH = clorhidrato; dosis y forma exactas.'),
+    ('FH-0104', 'GLIBENCLAMIDA TAB 5MG C/50',  19077682, 'alta', 'JorgeHRE 2026-11-12: glibenclamida = glyburide (DCI vs USAN); dosis y forma exactas.'),
+    ('FH-0105', 'LOSARTAN POT TAB 50MG C/30',  40185304, 'alta', 'JorgeHRE 2026-11-12: POT = potásico; dosis y forma exactas.'),
+    ('FH-0106', 'ENALAPRIL MAL TAB 10MG C/30', 40165762, 'alta', 'JorgeHRE 2026-11-12: MAL = maleato; dosis y forma exactas.'),
+    ('FH-0107', 'OMEPRAZOL CAP 20MG C/14',     19019418, 'alta', 'JorgeHRE 2026-11-12: la cápsula de omeprazol es de liberación retardada; se descarta 923720 (omeprazol + bicarbonato, otro producto).'),
+    ('FH-0108', 'KETOROLACO TROMET SOL INY 30MG/1ML AMP', 40164851, 'alta', 'JorgeHRE 2026-11-12: TROMET = trometamina; 30 mg/1 mL = 30 MG/ML.'),
+    ('FH-0109', 'METAMIZOL SOD SOL INY 1G/2ML AMP', 19031455, 'alta', 'JorgeHRE 2026-11-12: metamizol = dipyrone; 1 g/2 mL = 500 MG/ML. No se vende en EE. UU. pero está en RxNorm.'),
+    ('FH-0110', 'TMP/SMX TAB 80/400MG',        1836433,  'alta', 'JorgeHRE 2026-11-12: combinación abreviada y en orden inverso; ambos ingredientes y dosis coinciden.'),
+    ('FH-0111', 'AMOXI/AC CLAV SUSP 400/57MG/5ML 70ML', 19123605, 'alta', 'JorgeHRE 2026-11-12: 400/57 mg por 5 mL = 80/11.4 MG/ML; el volumen del frasco no forma parte del Clinical Drug.'),
+    ('FH-0112', 'BUTILHIOSCINA/METAMIZOL SOL INY 20MG/2.5G/5ML', 965844, 'dudosa', 'JorgeHRE 2026-11-12: concentraciones idénticas (4 y 500 MG/ML) pero RxNorm dice scopolamine, no butylscopolamine (ingrediente distinto, 40234201). Probable error de etiqueta en el vocabulario; usar con cuidado.'),
+    ('FH-0113', 'DICLOFENACO/COMPLEJO B TAB 50MG', 1124300, 'dudosa', 'JorgeHRE 2026-11-12: la combinación no existe en RxNorm (iría en RxNorm Extension, no cargada). Se mapea al ingrediente diclofenac; se pierden B1/B6/B12. Descartado betamethasone/diclofenac/vitamin B12 (añade un corticoide).'),
+    ('FH-0114', 'SOL HARTMANN 1000ML',         19135374, 'dudosa', 'JorgeHRE 2026-11-12: la descripción no da la composición; se infiere de la fórmula estándar de Hartmann (NaCl 6, lactato 3.1, KCl 0.3, CaCl2 0.2 mg/mL), que coincide. Verificar contra la etiqueta.'),
+    ('FH-0115', 'GASA SECA EST 10X10CM C/200', 0,        'no mapeable', 'JorgeHRE 2026-11-12: no es un fármaco sino un dispositivo médico; no hay concepto Drug. En OMOP iría a device_exposure con SNOMED 4224017 Gauze swab.')
+)
+SELECT m.clave_local, m.descripcion_local, m.concept_id, c.concept_name, m.confianza, m.quien_y_por_que,
+       CASE WHEN c.standard_concept = 'S' AND c.invalid_reason IS NULL THEN 'sí' ELSE 'no' END AS estandar_vigente,
+       c.domain_id AS dominio
+FROM mapeo m
+LEFT JOIN cdm.concept c ON c.concept_id = m.concept_id
+ORDER BY m.clave_local;
+-- mapeo_catalogo_local.csv se generó envolviendo 8b (sin las columnas de control) en
+-- COPY (SELECT clave_local, descripcion_local, concept_id, concept_name, confianza,
+--       quien_y_por_que FROM (<8b>) t ORDER BY clave_local) TO STDOUT WITH (FORMAT csv, HEADER);
+-- Comprobación: 16 líneas (encabezado + 15); 11 alta, 3 dudosa, 1 no mapeable.
