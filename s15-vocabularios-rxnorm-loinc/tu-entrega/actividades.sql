@@ -218,3 +218,112 @@ SELECT cs.version,
 FROM cs
 GROUP BY cs.version
 ORDER BY cs.version;
+
+
+-- =====================================================================
+-- Actividad 5. Leer tres códigos LOINC: los seis ejes
+-- =====================================================================
+-- Actividad 5a. Tabla 3 × 6 (Component, Property, Time, System, Scale, Method).
+-- En OMOP cada eje es un concepto aparte, unido al código por una relación
+-- «Has …» en concept_relationship. Granularidad cruda: 1 fila por (código, eje);
+-- el GROUP BY la colapsa a 1 fila por código (orden lógico: FROM/JOIN → WHERE
+-- → GROUP BY → SELECT, así que los FILTER trabajan sobre cada grupo-código).
+-- Method: 'Has method' existe en la base (143,014 filas) pero no para estos
+-- tres → NULL real, no fallo de carga; LOINC lo deja vacío si no importa el método.
+-- Esperado: 3 filas; Method = '(sin método)' en las tres.
+SELECT c.concept_code AS loinc,
+       max(e.concept_name) FILTER (WHERE cr.relationship_id = 'Has component')   AS component,
+       max(e.concept_name) FILTER (WHERE cr.relationship_id = 'Has property')    AS property,
+       max(e.concept_name) FILTER (WHERE cr.relationship_id = 'Has time aspect') AS time_aspect,
+       max(e.concept_name) FILTER (WHERE cr.relationship_id = 'Has system')      AS system,
+       max(e.concept_name) FILTER (WHERE cr.relationship_id = 'Has scale type')  AS scale,
+       coalesce(max(e.concept_name) FILTER (WHERE cr.relationship_id = 'Has method'),
+                '(sin método)')                                                  AS method
+FROM cdm.concept c
+JOIN cdm.concept_relationship cr ON cr.concept_id_1 = c.concept_id
+                                AND cr.invalid_reason IS NULL      -- solo relaciones vigentes
+JOIN cdm.concept e ON e.concept_id = cr.concept_id_2
+WHERE c.vocabulary_id = 'LOINC'
+  AND c.concept_code IN ('4548-4', '2160-0', '2345-7')
+  AND cr.relationship_id LIKE 'Has %'
+GROUP BY c.concept_code
+ORDER BY c.concept_code;
+
+-- Actividad 5a (verificación). Mismos FROM/JOIN/WHERE que 5a, pero contando
+-- en vez de pivotar: si filas = ejes_distintos en cada código, ningún eje está
+-- duplicado y el max() de 5a no esconde un segundo valor.
+-- ROLLUP añade una fila de total (concept_code vacío).
+-- Esperado: 5 | 5 en cada código y 15 en el total.
+SELECT c.concept_code,
+       count(*)                           AS filas,
+       count(DISTINCT cr.relationship_id) AS ejes_distintos
+FROM cdm.concept c
+JOIN cdm.concept_relationship cr ON cr.concept_id_1 = c.concept_id
+                                AND cr.invalid_reason IS NULL
+JOIN cdm.concept e ON e.concept_id = cr.concept_id_2
+WHERE c.vocabulary_id = 'LOINC'
+  AND c.concept_code IN ('4548-4', '2160-0', '2345-7')
+  AND cr.relationship_id LIKE 'Has %'
+GROUP BY ROLLUP (c.concept_code)
+ORDER BY c.concept_code;
+
+-- Actividad 5b. La trampa del eje System: ¿la base mezcla sangre total con
+-- suero/plasma para «el mismo» analito? Cuatro códigos: los dos de 5a y sus
+-- gemelos de sangre total (2339-0 glucosa, 38483-4 creatinina).
+-- Rendimiento: measurement se agrega UNA vez en la CTE med (un solo barrido
+-- filtrado por IN) y luego se une a 4 filas; nada de subconsultas por código.
+-- LEFT JOIN a med: si un código no tuviera mediciones, saldría con 0, no desaparecería.
+-- Esperado: 4 filas; sangre 69,106 y suero/plasma 49,484 en ambos analitos.
+WITH codigos AS (
+    SELECT c.concept_id, c.concept_code, c.concept_name, s.concept_name AS system
+    FROM cdm.concept c
+    JOIN cdm.concept_relationship cr ON cr.concept_id_1 = c.concept_id
+                                    AND cr.relationship_id = 'Has system'
+                                    AND cr.invalid_reason IS NULL
+    JOIN cdm.concept s ON s.concept_id = cr.concept_id_2
+    WHERE c.vocabulary_id = 'LOINC'
+      AND c.concept_code IN ('2345-7', '2339-0', '2160-0', '38483-4')
+),
+med AS (
+    SELECT measurement_concept_id,
+           count(*)                  AS mediciones,
+           count(DISTINCT person_id) AS pacientes
+    FROM cdm.measurement
+    WHERE measurement_concept_id IN (SELECT concept_id FROM codigos)
+    GROUP BY measurement_concept_id
+)
+SELECT k.concept_code AS loinc, k.system, k.concept_name,
+       coalesce(m.mediciones, 0) AS mediciones,
+       coalesce(m.pacientes, 0)  AS pacientes
+FROM codigos k
+LEFT JOIN med m ON m.measurement_concept_id = k.concept_id
+ORDER BY k.concept_name ~* 'creatinine', k.system;   -- glucosa primero, luego creatinina
+
+-- Actividad 5c. ¿Los cuatro códigos vienen en paneles? Granularidad de «dia»:
+-- 1 fila por (persona, fecha) con al menos uno de los cuatro códigos; cada
+-- columna cuenta cuántas veces aparece ese código ese día.
+-- Si glucosa y creatinina de un mismo System siempre llevan el mismo número,
+-- vienen juntas en un panel. Si un día tiene ambos System, hay doble panel.
+-- Verificación: sum(mediciones) = 69,106·2 + 49,484·2 = 237,180.
+WITH ids AS (
+    SELECT concept_id, concept_code
+    FROM cdm.concept
+    WHERE vocabulary_id = 'LOINC'
+      AND concept_code IN ('2345-7', '2339-0', '2160-0', '38483-4')
+),
+dia AS (
+    SELECT m.person_id, m.measurement_date,
+           count(*) FILTER (WHERE i.concept_code = '2339-0')  AS glu_sangre,
+           count(*) FILTER (WHERE i.concept_code = '38483-4') AS cre_sangre,
+           count(*) FILTER (WHERE i.concept_code = '2345-7')  AS glu_suero,
+           count(*) FILTER (WHERE i.concept_code = '2160-0')  AS cre_suero
+    FROM cdm.measurement m
+    JOIN ids i ON i.concept_id = m.measurement_concept_id
+    GROUP BY m.person_id, m.measurement_date
+)
+SELECT glu_sangre, cre_sangre, glu_suero, cre_suero,
+       count(*)                                          AS persona_dias,
+       sum(glu_sangre + cre_sangre + glu_suero + cre_suero) AS mediciones
+FROM dia
+GROUP BY glu_sangre, cre_sangre, glu_suero, cre_suero
+ORDER BY persona_dias DESC;
