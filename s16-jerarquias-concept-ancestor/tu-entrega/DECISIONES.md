@@ -16,3 +16,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** `UNION ALL` + la ruta recorrida en un `ARRAY` + `NOT (id = ANY(ruta))`, además del freno `nivel < 20`. Se reporta la profundidad **mínima (6) y máxima (7)**, igual que `min_levels_of_separation` y `max_levels_of_separation` de `concept_ancestor`.
 - **Alternativas:** `UNION ALL` simple (20 filas con repetidos y sin saber por qué camino llegó cada una) o `UNION` (parece limpio, pero solo quita filas idénticas: *Disease* sigue saliendo en los niveles 4 y 5).
 - **Por qué:** cada fila lleva su camino completo, así que se ven los 4 caminos a la raíz. La condición sobre la ruta impide volver a un concepto ya visitado (protege contra ciclos), y la misma consulta sirve después para las actividades 4 y 6.
+
+## 4. Cómo comparar los ancestros de la recursiva con los de `concept_ancestor`
+- **Decisión:** `FULL OUTER JOIN` de los dos conjuntos con una columna de origen («ambos», «solo recursiva», «solo concept_ancestor»), una fila por concepto.
+- **Alternativas:** dos `EXCEPT` (recursiva − CA y CA − recursiva), que es la comparación de conjuntos literal, pero da dos resultados y no muestra lo que coincide.
+- **Por qué:** en una sola tabla se ve lo común y lo distinto, que es la forma habitual de conciliar dos fuentes en la industria. Condición: dejar antes la recursiva en un concepto por fila (`DISTINCT`), porque sus 20 filas con repetidos multiplicarían el JOIN.

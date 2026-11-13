@@ -51,7 +51,8 @@ ORDER BY tablename, indexname;
 -- ruta (ARRAY): lista ordenada de los concept_id recorridos; con || se le
 -- añade el nuevo, y NOT (id = ANY(ruta)) impide visitar dos veces el mismo
 -- concepto en un camino (protección contra ciclos; decisión 3).
--- Resultado (2026-11-13): 20 filas, niveles 0 a 7, 11 conceptos distintos.
+-- Resultado (2026-11-13): 20 filas, niveles 0 a 7, 12 conceptos distintos
+--   (T2DM + 11 ancestros).
 --   Hay repetidos a propósito (UNION ALL): Disease sale 3 veces (niveles 4
 --   y 5), Clinical finding 4 (5 y 6), SNOMED CT Concept 4 (6 y 7): una
 --   fila por camino. 3 conceptos sin standard_concept (NULL = no estándar,
@@ -124,3 +125,81 @@ CROSS JOIN LATERAL unnest(k.ruta) WITH ORDINALITY AS r(concept_id, pos)
 JOIN cdm.concept c ON c.concept_id = r.concept_id   -- 1:1 por PK
 GROUP BY k.profundidad, k.ruta
 ORDER BY k.profundidad, camino;
+
+-- =====================================================================
+-- Actividad 2. Los mismos ancestros de T2DM (201826) con concept_ancestor.
+-- =====================================================================
+-- Actividad 2a. Una sola consulta, sin recursión.
+-- concept_ancestor ya tiene precalculado el cierre de la jerarquía: una
+-- fila por cada par (ancestro, descendiente), a cualquier distancia, con
+-- la distancia mínima y máxima entre ellos (min/max_levels_of_separation).
+-- Se busca por descendant_concept_id = 201826 porque queremos sus ancestros.
+-- Ojo: incluye una fila del propio concepto consigo mismo (nivel 0/0);
+-- la recursiva también lo trae en su nivel 0, así que se comparan igual.
+-- Resultado (2026-11-13): 9 filas = T2DM + 8 ancestros (la recursiva da
+--   T2DM + 11). Todos con standard_concept = 'S'; no aparecen SNOMED CT
+--   Concept, Disorder by body site ni Finding by site. Hay poli-jerarquía
+--   en min ≠ max: Disease 4/5 y Clinical finding 5/6, los mismos niveles
+--   que dieron los caminos de la actividad 1b.
+SELECT ca.ancestor_concept_id,
+       c.concept_name,
+       c.standard_concept,
+       ca.min_levels_of_separation AS min_niv,
+       ca.max_levels_of_separation AS max_niv
+FROM cdm.concept_ancestor ca
+JOIN cdm.concept c ON c.concept_id = ca.ancestor_concept_id   -- 1:1 por PK
+WHERE ca.descendant_concept_id = 201826
+ORDER BY min_niv, max_niv, ca.ancestor_concept_id;
+
+-- Actividad 2b. ¿Son idénticos los dos conjuntos? Conciliación en una tabla.
+-- Por qué GROUP BY en la recursiva: deja UN concepto por fila (hace de
+-- DISTINCT) y a la vez calcula su nivel mínimo y máximo entre caminos.
+-- Sin él, las 20 filas de 1a multiplicarían el JOIN (Disease 3 veces...).
+-- FULL OUTER JOIN: conserva las filas de ambos lados aunque no tengan
+-- pareja; donde un lado falta, sus columnas salen NULL. Ese NULL es la
+-- señal de «no está en esa fuente», no un dato perdido.
+-- COALESCE toma el primer valor no NULL para tener un id en todas las filas.
+-- Conteos: rec 12 filas, ca 9 filas, JOIN 12 (9 parejas + 3 sin pareja):
+--   no hay multiplicación porque ambos lados tienen 1 fila por concepto.
+-- Resultado (2026-11-13): 12 filas. NO son idénticos: 9 «ambos» y 3 «solo
+--   recursiva» (Disorder by body site, Finding by site, SNOMED CT Concept,
+--   los 3 con standard_concept NULL); 0 «solo concept_ancestor». En los 9
+--   comunes los niveles coinciden (niveles_iguales = true en las 9).
+WITH RECURSIVE sube AS (
+    SELECT c.concept_id, 0 AS nivel, ARRAY[c.concept_id] AS ruta
+    FROM cdm.concept c
+    WHERE c.concept_id = 201826
+    UNION ALL
+    SELECT cr.concept_id_2, s.nivel + 1, s.ruta || cr.concept_id_2
+    FROM sube s
+    JOIN cdm.concept_relationship cr
+      ON cr.concept_id_1 = s.concept_id
+     AND cr.relationship_id = 'Is a'
+     AND cr.invalid_reason IS NULL
+    WHERE s.nivel < 20
+      AND NOT (cr.concept_id_2 = ANY(s.ruta))
+),
+rec AS (                                      -- 1 fila por concepto
+    SELECT concept_id, min(nivel) AS rec_min, max(nivel) AS rec_max
+    FROM sube
+    GROUP BY concept_id
+),
+ca AS (                                       -- ya es 1 fila por ancestro
+    SELECT ancestor_concept_id AS concept_id,
+           min_levels_of_separation AS ca_min,
+           max_levels_of_separation AS ca_max
+    FROM cdm.concept_ancestor
+    WHERE descendant_concept_id = 201826
+)
+SELECT COALESCE(rec.concept_id, ca.concept_id) AS concept_id,
+       c.concept_name,
+       c.standard_concept,
+       CASE WHEN ca.concept_id IS NULL THEN 'solo recursiva'
+            WHEN rec.concept_id IS NULL THEN 'solo concept_ancestor'
+            ELSE 'ambos' END AS origen,
+       rec.rec_min, rec.rec_max, ca.ca_min, ca.ca_max,
+       (rec.rec_min = ca.ca_min AND rec.rec_max = ca.ca_max) AS niveles_iguales
+FROM rec
+FULL OUTER JOIN ca ON ca.concept_id = rec.concept_id
+JOIN cdm.concept c ON c.concept_id = COALESCE(rec.concept_id, ca.concept_id)
+ORDER BY origen, rec.rec_min, concept_id;
