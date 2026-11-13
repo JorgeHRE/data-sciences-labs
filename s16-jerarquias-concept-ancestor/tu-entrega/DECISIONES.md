@@ -21,3 +21,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** `FULL OUTER JOIN` de los dos conjuntos con una columna de origen («ambos», «solo recursiva», «solo concept_ancestor»), una fila por concepto.
 - **Alternativas:** dos `EXCEPT` (recursiva − CA y CA − recursiva), que es la comparación de conjuntos literal, pero da dos resultados y no muestra lo que coincide.
 - **Por qué:** en una sola tabla se ve lo común y lo distinto, que es la forma habitual de conciliar dos fuentes en la industria. Condición: dejar antes la recursiva en un concepto por fila (`DISTINCT`), porque sus 20 filas con repetidos multiplicarían el JOIN.
+
+## 5. Fármaco para listar las relaciones salientes (actividad 3)
+- **Decisión:** metformina como ingrediente, RxNorm **1503297** (clase Ingredient, estándar).
+- **Alternativas:** el producto que toman los pacientes de la base, 40163924 (24 HR metformin hydrochloride 500 MG ER Oral Tablet, 8 tipos de relación, con más estructura interna de RxNorm: forma farmacéutica, versión cuantificada).
+- **Por qué:** tiene 9 tipos de relación y más variados (ATC, marcas, mapeos, productos que la contienen), es el ingrediente de los concept sets de la sesión 15 y reúne los dos casos que contrastan: `RxNorm ing of` (jerárquica y define ascendencia) y `Has brand name` (jerárquica sin definir ascendencia).
