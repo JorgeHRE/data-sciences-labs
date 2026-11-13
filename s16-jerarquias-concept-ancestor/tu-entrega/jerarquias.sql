@@ -34,3 +34,93 @@ WHERE schemaname = 'cdm'
   AND tablename IN ('concept_ancestor', 'concept_relationship',
                     'relationship', 'condition_occurrence')
 ORDER BY tablename, indexname;
+
+-- =====================================================================
+-- Actividad 1. Subir con 'Is a' desde T2DM (201826) hasta la raíz.
+-- =====================================================================
+-- Actividad 1a. Cada paso de la subida, con su nivel.
+-- Cómo funciona un WITH RECURSIVE: la parte de arriba del UNION ALL (ancla)
+-- se ejecuta una vez y produce el nivel 0; la parte de abajo se repite
+-- usando SOLO las filas nuevas de la vuelta anterior, hasta que una vuelta
+-- no produce filas. Por eso cada vuelta sube exactamente un nivel.
+-- Las tres trampas del enunciado:
+--   1) relationship_id = 'Is a': solo hacia arriba ('Subsumes' es la misma
+--      arista al revés; sin el filtro se sube y se baja sin fin).
+--   2) nivel < 20: freno de seguridad aunque haya ruta.
+--   3) invalid_reason IS NULL: no recorrer aristas retiradas.
+-- ruta (ARRAY): lista ordenada de los concept_id recorridos; con || se le
+-- añade el nuevo, y NOT (id = ANY(ruta)) impide visitar dos veces el mismo
+-- concepto en un camino (protección contra ciclos; decisión 3).
+-- Resultado (2026-11-13): 20 filas, niveles 0 a 7, 11 conceptos distintos.
+--   Hay repetidos a propósito (UNION ALL): Disease sale 3 veces (niveles 4
+--   y 5), Clinical finding 4 (5 y 6), SNOMED CT Concept 4 (6 y 7): una
+--   fila por camino. 3 conceptos sin standard_concept (NULL = no estándar,
+--   de clasificación): Disorder by body site, Finding by site, SNOMED CT
+--   Concept → pista para la actividad 2.
+WITH RECURSIVE sube AS (
+    -- Ancla: el concepto de partida (nivel 0).
+    SELECT c.concept_id, 0 AS nivel, ARRAY[c.concept_id] AS ruta
+    FROM cdm.concept c
+    WHERE c.concept_id = 201826
+    UNION ALL
+    -- Paso recursivo: los padres directos de las filas de la vuelta anterior.
+    SELECT cr.concept_id_2, s.nivel + 1, s.ruta || cr.concept_id_2
+    FROM sube s
+    JOIN cdm.concept_relationship cr
+      ON cr.concept_id_1 = s.concept_id      -- hijo → padre
+     AND cr.relationship_id = 'Is a'          -- trampa 1
+     AND cr.invalid_reason IS NULL            -- trampa 3
+    WHERE s.nivel < 20                        -- trampa 2
+      AND NOT (cr.concept_id_2 = ANY(s.ruta)) -- sin ciclos
+)
+SELECT s.nivel, s.concept_id, c.concept_name, c.standard_concept
+FROM sube s
+JOIN cdm.concept c USING (concept_id)         -- 1 fila por concept_id: no duplica
+ORDER BY s.nivel, s.concept_id;
+
+-- Actividad 1b. Los caminos completos hasta la raíz y la profundidad.
+-- Misma recursión que 1a (se repite para que cada consulta corra sola).
+-- Un camino termina donde el concepto ya no tiene padre 'Is a' vigente
+-- (NOT EXISTS): esa fila es la raíz y su ruta es el camino entero.
+-- Para pasar la ruta (ARRAY de ids) a texto: unnest la abre en filas,
+-- WITH ORDINALITY numera la posición (pos) para conservar el orden, y
+-- string_agg(... ORDER BY pos) la vuelve a juntar con nombres.
+-- min/max OVER (): funciones de ventana sobre todo el resultado; se
+-- calculan DESPUÉS del GROUP BY, por eso ven los 4 caminos ya formados.
+-- Resultado (2026-11-13): 4 caminos, todos terminan en SNOMED CT Concept
+-- (4008453). Profundidad mínima 6 (vía Disorder of endocrine system ›
+-- Disorder of body system › Disease) y máxima 7 (los otros 3).
+-- Comprobación contra 1a: las 20 filas de 1a son los tramos distintos de
+-- estos 4 caminos; por nivel 0..7 hay 1+1+2+2+3+4+4+3 = 20.
+WITH RECURSIVE sube AS (
+    SELECT c.concept_id, 0 AS nivel, ARRAY[c.concept_id] AS ruta
+    FROM cdm.concept c
+    WHERE c.concept_id = 201826
+    UNION ALL
+    SELECT cr.concept_id_2, s.nivel + 1, s.ruta || cr.concept_id_2
+    FROM sube s
+    JOIN cdm.concept_relationship cr
+      ON cr.concept_id_1 = s.concept_id
+     AND cr.relationship_id = 'Is a'
+     AND cr.invalid_reason IS NULL
+    WHERE s.nivel < 20
+      AND NOT (cr.concept_id_2 = ANY(s.ruta))
+),
+caminos AS (                                  -- 1 fila por camino completo
+    SELECT s.nivel AS profundidad, s.ruta
+    FROM sube s
+    WHERE NOT EXISTS (                        -- sin padre = raíz
+        SELECT 1 FROM cdm.concept_relationship cr
+        WHERE cr.concept_id_1 = s.concept_id
+          AND cr.relationship_id = 'Is a'
+          AND cr.invalid_reason IS NULL)
+)
+SELECT k.profundidad,
+       min(k.profundidad) OVER () AS prof_min,
+       max(k.profundidad) OVER () AS prof_max,
+       string_agg(c.concept_name, ' › ' ORDER BY r.pos) AS camino
+FROM caminos k
+CROSS JOIN LATERAL unnest(k.ruta) WITH ORDINALITY AS r(concept_id, pos)
+JOIN cdm.concept c ON c.concept_id = r.concept_id   -- 1:1 por PK
+GROUP BY k.profundidad, k.ruta
+ORDER BY k.profundidad, camino;
