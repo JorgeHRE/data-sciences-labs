@@ -287,3 +287,70 @@ JOIN cdm.concept c ON c.concept_id = ca.ancestor_concept_id   -- 1:1 por PK
 WHERE ca.descendant_concept_id = 1503297
   AND c.vocabulary_id = 'ATC'
 ORDER BY min_niv, c.concept_code;
+
+-- =====================================================================
+-- Actividad 4. Poli-jerarquía: un par con más de un camino.
+-- =====================================================================
+-- Actividad 4a. La «pista gratis»: pares de concept_ancestor con
+-- min_levels_of_separation ≠ max_levels_of_separation, es decir, con más de
+-- un camino entre ancestro y descendiente. Se busca entre los ancestros de
+-- T2DM (201826), que tiene 444 pacientes en condition_occurrence.
+-- Resultado (2026-11-13): 2 pares. Disease (4274025) 4/5 y Clinical
+--   finding (441840) 5/6. Se elige Disease (decisión 6).
+SELECT ca.ancestor_concept_id,
+       c.concept_name,
+       ca.min_levels_of_separation AS min_niv,
+       ca.max_levels_of_separation AS max_niv
+FROM cdm.concept_ancestor ca
+JOIN cdm.concept c ON c.concept_id = ca.ancestor_concept_id   -- 1:1 por PK
+WHERE ca.descendant_concept_id = 201826
+  AND ca.min_levels_of_separation <> ca.max_levels_of_separation
+ORDER BY min_niv;
+
+-- Actividad 4b. Los dos caminos de T2DM (201826) a Disease (4274025),
+-- reconstruidos con concept_relationship (decisión 6).
+-- Cambios respecto a la actividad 1:
+--   · JOIN con concept sobre el DESTINO de cada paso (concept_id_2) y
+--     c2.invalid_reason IS NULL: no entrar en conceptos retirados (la
+--     trampa 3 solo filtraba aristas retiradas). Es 1:1 por PK: no
+--     multiplica filas, solo descarta.
+--   · s.concept_id <> 4274025: al llegar a Disease no se sigue subiendo;
+--     lo que hay por encima no forma parte del par.
+-- Se queda con las filas que terminan en Disease y pasa la ruta a texto
+-- como en 1b. Las columnas ca_min/ca_max se traen de concept_ancestor
+-- para comprobar en la misma fila que los largos coinciden.
+-- Resultado (2026-11-13): 2 caminos. Largo 4 por la rama endocrina
+--   (Disorder of endocrine system › Disorder of body system) y largo 5
+--   por la metabólica (Disorder of glucose metabolism › Disorder of
+--   carbohydrate metabolism › Metabolic disease). ca_min 4 / ca_max 5.
+WITH RECURSIVE sube AS (
+    SELECT c.concept_id, 0 AS nivel, ARRAY[c.concept_id] AS ruta
+    FROM cdm.concept c
+    WHERE c.concept_id = 201826
+    UNION ALL
+    SELECT cr.concept_id_2, s.nivel + 1, s.ruta || cr.concept_id_2
+    FROM sube s
+    JOIN cdm.concept_relationship cr
+      ON cr.concept_id_1 = s.concept_id
+     AND cr.relationship_id = 'Is a'
+     AND cr.invalid_reason IS NULL          -- arista vigente
+    JOIN cdm.concept c2
+      ON c2.concept_id = cr.concept_id_2
+     AND c2.invalid_reason IS NULL          -- concepto destino vigente
+    WHERE s.nivel < 20
+      AND NOT (cr.concept_id_2 = ANY(s.ruta))
+      AND s.concept_id <> 4274025           -- no pasar de Disease
+)
+SELECT s.nivel AS largo,
+       string_agg(c.concept_name, ' › ' ORDER BY r.pos) AS camino,
+       ca.min_levels_of_separation AS ca_min,
+       ca.max_levels_of_separation AS ca_max
+FROM sube s
+CROSS JOIN LATERAL unnest(s.ruta) WITH ORDINALITY AS r(concept_id, pos)
+JOIN cdm.concept c ON c.concept_id = r.concept_id          -- 1:1 por PK
+JOIN cdm.concept_ancestor ca
+  ON ca.ancestor_concept_id = 4274025
+ AND ca.descendant_concept_id = 201826                      -- 1 sola fila
+WHERE s.concept_id = 4274025                                -- termina en Disease
+GROUP BY s.nivel, s.ruta, ca.min_levels_of_separation, ca.max_levels_of_separation
+ORDER BY largo;

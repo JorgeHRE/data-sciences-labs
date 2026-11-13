@@ -26,3 +26,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** metformina como ingrediente, RxNorm **1503297** (clase Ingredient, estándar).
 - **Alternativas:** el producto que toman los pacientes de la base, 40163924 (24 HR metformin hydrochloride 500 MG ER Oral Tablet, 8 tipos de relación, con más estructura interna de RxNorm: forma farmacéutica, versión cuantificada).
 - **Por qué:** tiene 9 tipos de relación y más variados (ATC, marcas, mapeos, productos que la contienen), es el ingrediente de los concept sets de la sesión 15 y reúne los dos casos que contrastan: `RxNorm ing of` (jerárquica y define ascendencia) y `Has brand name` (jerárquica sin definir ascendencia).
+
+## 6. Par con poli-jerarquía y cómo reconstruir sus caminos (actividad 4)
+- **Decisión:** el par T2DM 201826 → *Disease* 4274025 (min 4 / max 5), reconstruido con `concept_relationship` excluyendo los conceptos retirados (`concept.invalid_reason IS NULL` en el destino de cada paso, además de la arista vigente).
+- **Alternativas:** el par T2DM → *Clinical finding* 441840 (5/6; la misma idea con un nivel más, casi en la raíz); o reconstruir sin excluir conceptos retirados, que añade un tercer camino de 5 pasos por *Disorder by body site* (retirado en 2021).
+- **Por qué:** los dos caminos tienen lectura clínica directa (la diabetes como enfermedad endocrina y como enfermedad metabólica), y sin conceptos retirados salen exactamente los 2 caminos que describe `concept_ancestor` (4 y 5). La trampa 3 de la actividad 1 solo filtraba aristas retiradas, no conceptos retirados.
