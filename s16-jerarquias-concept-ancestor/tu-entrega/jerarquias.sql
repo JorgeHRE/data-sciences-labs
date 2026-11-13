@@ -55,9 +55,11 @@ ORDER BY tablename, indexname;
 --   (T2DM + 11 ancestros).
 --   Hay repetidos a propósito (UNION ALL): Disease sale 3 veces (niveles 4
 --   y 5), Clinical finding 4 (5 y 6), SNOMED CT Concept 4 (6 y 7): una
---   fila por camino. 3 conceptos sin standard_concept (NULL = no estándar,
---   de clasificación): Disorder by body site, Finding by site, SNOMED CT
---   Concept → pista para la actividad 2.
+--   fila por camino. 3 conceptos sin standard_concept (NULL = no estándar):
+--   Disorder by body site y Finding by site, RETIRADOS en 2021 (invalid_reason
+--   'U') pero con aristas 'Is a' aún vigentes, y SNOMED CT Concept, la raíz
+--   de metadatos (dominio Metadata). Pista para la actividad 2. Ojo: la
+--   trampa 3 filtra relaciones retiradas, no conceptos retirados.
 WITH RECURSIVE sube AS (
     -- Ancla: el concepto de partida (nivel 0).
     SELECT c.concept_id, 0 AS nivel, ARRAY[c.concept_id] AS ruta
@@ -203,3 +205,85 @@ FROM rec
 FULL OUTER JOIN ca ON ca.concept_id = rec.concept_id
 JOIN cdm.concept c ON c.concept_id = COALESCE(rec.concept_id, ca.concept_id)
 ORDER BY origen, rec.rec_min, concept_id;
+
+-- =====================================================================
+-- Actividad 3. La tabla RELATIONSHIP: qué relaciones cuentan como jerarquía.
+-- =====================================================================
+-- Actividad 3a. ¿Cuántos tipos de relación hay y cuántos son jerárquicos o
+-- definen ascendencia? ¿Coinciden los dos conjuntos?
+-- is_hierarchical: la relación es de tipo «más general / más específico».
+-- defines_ancestry: la relación se usa para construir concept_ancestor.
+-- Centinela: las dos columnas son varchar(1) con '0'/'1', no números; por
+-- eso se compara con '1' (texto).
+-- count(*) FILTER (WHERE ...): cuenta solo las filas que cumplen la
+-- condición; permite varios conteos distintos en una sola pasada.
+-- Resultado (2026-11-13): 724 tipos; 124 jerárquicos; 63 definen
+--   ascendencia; 55 ambos → NO coinciden: 69 jerárquicos que no definen
+--   ascendencia y 8 que la definen sin ser jerárquicos.
+SELECT count(*)                                        AS tipos,
+       count(*) FILTER (WHERE is_hierarchical  = '1')  AS jerarquicos,
+       count(*) FILTER (WHERE defines_ancestry = '1')  AS definen_ascendencia,
+       count(*) FILTER (WHERE is_hierarchical  = '1'
+                          AND defines_ancestry = '1')  AS ambos,
+       count(*) FILTER (WHERE is_hierarchical  = '1'
+                          AND defines_ancestry = '0')  AS solo_jerarquicos,
+       count(*) FILTER (WHERE is_hierarchical  = '0'
+                          AND defines_ancestry = '1')  AS solo_ascendencia
+FROM cdm.relationship;
+
+-- Actividad 3b. Todas las relaciones distintas que SALEN de metformina
+-- (RxNorm 1503297, ingrediente; decisión 5).
+-- «Salen» = metformina es concept_id_1; concept_id_2 es el destino.
+-- Una fila por tipo de relación (GROUP BY), con sus banderas de
+-- RELATIONSHIP, cuántos destinos tiene y de qué vocabulario/clase son.
+-- ejemplo: el primer destino en orden alfabético (array_agg ordenado y
+-- [1]); sirve para ilustrar, no es el destino «principal».
+-- Conteos: 247 filas de concept_relationship salen de 1503297, todas
+--   vigentes (invalid_reason NULL); los dos JOIN las mantienen en 247
+--   (relationship y concept son 1 fila por id) y el GROUP BY da 9.
+-- Resultado (2026-11-13): 9 tipos. Solo 2 jerárquicos: RxNorm ing of
+--   (1/1, 75 productos que la contienen) y Has brand name (1/0, 23
+--   marcas). Los otros 7 son 0/0: mapeos (Maps to apunta a sí misma,
+--   Mapped from 120 códigos de otros vocabularios), enlaces a ATC (pr lat
+--   23; sec up 1, raro: A12AA20 calcio), equivalencias SNOMED (2), su sal
+--   (Has form → metformin hydrochloride) y Value mapped from (alergia).
+SELECT cr.relationship_id,
+       r.relationship_name,
+       r.is_hierarchical  AS jer,
+       r.defines_ancestry AS asc_,
+       count(*)           AS destinos,
+       string_agg(DISTINCT c2.vocabulary_id || '/' || c2.concept_class_id, ', ')
+                          AS tipo_destino,
+       (array_agg(c2.concept_name ORDER BY c2.concept_name))[1] AS ejemplo
+FROM cdm.concept_relationship cr
+JOIN cdm.relationship r ON r.relationship_id = cr.relationship_id  -- 1:1
+JOIN cdm.concept c2     ON c2.concept_id     = cr.concept_id_2     -- 1:1
+WHERE cr.concept_id_1 = 1503297
+  AND cr.invalid_reason IS NULL
+GROUP BY cr.relationship_id, r.relationship_name,
+         r.is_hierarchical, r.defines_ancestry
+ORDER BY destinos DESC, cr.relationship_id;
+
+-- Actividad 3c. Comprobación: ¿qué ancestros tiene metformina en
+-- concept_ancestor fuera de RxNorm?
+-- Por qué: 'RxNorm - ATC pr lat' y su inversa tienen banderas 0/0, así que
+-- por la regla general NO deberían crear ascendencia. Si aparecen códigos
+-- ATC como ancestros, las banderas no bastan para predecir concept_ancestor.
+-- Sin JOIN que multiplique: concept es 1 fila por id.
+-- Resultado (2026-11-13): 29 ancestros ATC (la fila de metformina
+--   consigo misma no sale: es RxNorm). 23 códigos de 5.º nivel a nivel 0
+--   (los mismos 23 de 'RxNorm - ATC pr lat': A10BA02 «metformin; oral» y
+--   combinaciones A10BD..), y por encima la jerarquía ATC: A10BA
+--   Biguanides y A10BD (1), A10B (2), A10 (3), A (4). También A12AA20
+--   (calcio, 5.º nivel pero a nivel 1; «sec up» = secundario hacia
+--   arriba), el enlace raro de 'RxNorm - ATC sec up'.
+SELECT c.concept_code,
+       c.concept_name,
+       c.concept_class_id,
+       ca.min_levels_of_separation AS min_niv,
+       ca.max_levels_of_separation AS max_niv
+FROM cdm.concept_ancestor ca
+JOIN cdm.concept c ON c.concept_id = ca.ancestor_concept_id   -- 1:1 por PK
+WHERE ca.descendant_concept_id = 1503297
+  AND c.vocabulary_id = 'ATC'
+ORDER BY min_niv, c.concept_code;
