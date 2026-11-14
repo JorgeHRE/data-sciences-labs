@@ -63,6 +63,26 @@ Comprobación: sin el JOIN (filtrando con `IN`), `condition_occurrence` tiene 19
 ### Por qué difieren
 Es una sola consulta con tres formas de contar sobre el mismo JOIN. A usa `COUNT(*)` y cuenta todas las filas del JOIN, por lo que el mismo diagnóstico se repite una vez por cada miembro del set que lo tiene debajo (3 veces para 4229440). B usa `COUNT(DISTINCT condition_concept_id)` y cuenta solo los códigos del set que realmente aparecen en los diagnósticos, por eso da 2: describe las enfermedades registradas, no a los pacientes. Finalmente, C usa `COUNT(DISTINCT person_id)` y es el único que responde «¿cuántos pacientes tienen insuficiencia cardiaca?»: **194**.
 
+## Actividad 6. «¿Por qué entró este paciente?»
+
+### La consulta (6a)
+Función `results.por_que_entro(person_id)` (decisión 10) para la cohorte de insuficiencia cardiaca de la actividad 5. Devuelve una fila por evento × miembro del concept set que lo cubre: evento → concepto de origen → concepto estándar → rama → niveles hasta la rama. Se llama con `SELECT * FROM results.por_que_entro(79);` desde psql, Python o R.
+
+### Salida para tres pacientes (6b)
+| Paciente | Quién lo eligió | Concepto estándar | Ramas por las que entra |
+|---|---|---|---|
+| 79 | yo | 4229440 Chronic congestive heart failure (origen SNOMED 88805009) | 3: *Congestive* (1 nivel), *Chronic* (1 nivel), *Heart failure* (2 niveles) |
+| 892 | yo | 316139 Heart failure (origen SNOMED 84114007) | 1: *Heart failure* (0 niveles: es el miembro del set) |
+| 273 | un compañero del grupo | — | 0 filas: no pertenece a la cohorte |
+
+Control adicional: el paciente 1, fuera de la cohorte, también devuelve 0 filas.
+
+### ¿Por qué no entró el 273? (6d)
+Existe en `cdm.person` y tiene 12 diagnósticos. No entró porque ninguno de sus 12 diagnósticos es insuficiencia cardiaca: ninguno es descendiente, en `concept_ancestor`, de los 3 miembros del concept set. Tiene prediabetes e hipertensión esencial, factores de riesgo de insuficiencia cardiaca, pero no el diagnóstico. Su *Prediabetes* es 37018196, el reemplazo del concepto retirado de la actividad 7.
+
+### Funciona para cualquier paciente (6c)
+Aplicada a las 5,904 personas de `cdm.person`: 568 filas, 194 pacientes, 194 eventos (187 con 3 ramas + 7 con 1). Reproduce exactamente A y C de la actividad 5. Tarda ~12 s (la función recorre `condition_occurrence` en cada una de las 5,904 llamadas); para un paciente, ~12 ms.
+
 ## Actividad 7. Cazar conceptos muertos
 
 ### Nuestros concept sets (7a)
