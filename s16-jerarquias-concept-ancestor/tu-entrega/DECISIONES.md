@@ -46,3 +46,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** concept set de insuficiencia cardiaca de la actividad 5 (124 conceptos, 194 pacientes), materializado en una **tabla temporal** con `PRIMARY KEY` y `ANALYZE`; tres corridas intercaladas de cada versión y mediana del `Execution Time`. Sin índice nuevo en `cdm.condition_occurrence`.
 - **Alternativas:** `results.cs_t2dm` C (cohorte de la sesión 17, pero con exclusiones: la versión `IN` no sería una subconsulta pura sobre `concept_ancestor`); materializar en `results` (persistente y reutilizable, pero deja un objeto más que mantener).
 - **Por qué:** una sola pregunta con resultado conocido (C = 194) y continuidad con las actividades 5 y 7; la tabla temporal no deja nada en la base. Crear el índice en `condition_occurrence` sí cambiaría el plan, pero `cdm` es de solo lectura (decisión 1).
+
+## 10. Consulta de depuración «¿por qué entró este paciente?» (actividad 6)
+- **Decisión:** cohorte de insuficiencia cardiaca (concept set de la actividad 5) y una **función SQL** `results.por_que_entro(person_id)` que devuelve una fila por evento × miembro del set que lo cubre (la rama), con su distancia (`min_levels_of_separation`).
+- **Alternativas:** cohorte `results.cs_t2dm` C (la de la sesión 17, pero sus ramas no se traslapan y habría que reconstruir las exclusiones); parametrizar con `\set` de psql (solo funciona en psql) o con un CTE de parámetros (hay que editar el número en el texto).
+- **Por qué:** con IC se ve la poli-jerarquía paciente por paciente (4229440 entra por 3 ramas). La función se llama igual desde psql, Python o R y se puede aplicar a una lista de pacientes, incluido uno fuera de la cohorte (0 filas). Es el entregable más reutilizable del lab.
