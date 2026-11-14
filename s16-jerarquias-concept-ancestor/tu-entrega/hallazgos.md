@@ -62,3 +62,31 @@ Comprobación: sin el JOIN (filtrando con `IN`), `condition_occurrence` tiene 19
 
 ### Por qué difieren
 Es una sola consulta con tres formas de contar sobre el mismo JOIN. A usa `COUNT(*)` y cuenta todas las filas del JOIN, por lo que el mismo diagnóstico se repite una vez por cada miembro del set que lo tiene debajo (3 veces para 4229440). B usa `COUNT(DISTINCT condition_concept_id)` y cuenta solo los códigos del set que realmente aparecen en los diagnósticos, por eso da 2: describe las enfermedades registradas, no a los pacientes. Finalmente, C usa `COUNT(DISTINCT person_id)` y es el único que responde «¿cuántos pacientes tienen insuficiencia cardiaca?»: **194**.
+
+## Actividad 7. Cazar conceptos muertos
+
+### Nuestros concept sets (7a)
+| Concept set | Conceptos | `'D'` | `'U'` |
+|---|---|---|---|
+| IC de la actividad 5 (expandido) | 124 | 0 | 0 |
+| `results.cs_t2dm` C (lab 14) | 131 | 0 | 0 |
+
+0 retirados por construcción: `concept_ancestor` solo contiene conceptos estándar vigentes, así que un set expandido con ella no arrastra conceptos muertos.
+
+### Conceptos de origen retirados en `condition_occurrence` (7b)
+| Origen | Nombre | `invalid_reason` | Eventos | Reemplazo (`'Concept replaced by'`) | Pac. lista vieja | Pac. lista nueva |
+|---|---|---|---|---|---|---|
+| 40316773 | Prediabetes | U | 2,239 | 37018196 Prediabetes | 0 | 2,239 |
+| 4166590 | Brain damage - traumatic | U | 26 | — (solo *same_as* → 4132546 Traumatic brain injury) | 0 | no se sustituye |
+| 4196262 | Metastasis from malignant tumor of prostate | D | 18 | — (solo *Maps to* → 200962 Primary malignant neoplasm of prostate) | 0 | no se sustituye |
+| 135333 | Pressure ulcer | U | 1 | 37159532 Pressure injury | 0 | 1 |
+
+**Efecto de la corrección:** una lista literal con los códigos viejos encuentra 0 pacientes; actualizada con `'Concept replaced by'` encuentra **2,240** (2,239 + 1).
+
+### Por qué falla en silencio
+La lista anterior se escribió con IDs viejos, por lo que devuelve 0 pacientes sin generar un error ni una consulta fallida: simplemente no encuentra nada. El ETL guarda el código original en `condition_source_concept_id` y el estándar al que lo tradujo en `condition_concept_id`, que es donde se buscan los concept sets; ahí el ID viejo nunca aparece.
+
+### Por qué no se sustituyen automáticamente los otros dos
+*Brain damage - traumatic* solo tiene *Concept same_as to*: probablemente equivalente, pero el vocabulario no lo declara reemplazo y debe confirmarlo una persona. La metástasis de próstata fue borrada sin sucesor, y su *Maps to* apunta al tumor primario: una metástasis no es lo mismo que un tumor primario, así que sustituirla cambiaría la definición de la cohorte (mezclaría enfermedad diseminada con localizada).
+
+**Antecedente:** el código ICD10CM E11.640 de la lista del lab 14 también está retirado (`'D'`, desde 2009-12-31).

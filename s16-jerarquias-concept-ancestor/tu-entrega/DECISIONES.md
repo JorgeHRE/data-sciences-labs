@@ -36,3 +36,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** el padre *Heart failure* 316139 y sus dos ramas, *Congestive* 319835 y *Chronic* 444031, todos con descendientes. B = `condition_concept_id` distintos **de los eventos** (no el tamaño del concept set).
 - **Alternativas:** solo las dos ramas (A 374 / B 1 / C 187: el doble conteo exacto, A = 2 × C, pero deja fuera a los 7 pacientes codificados con el padre); para B, el número de conceptos del set expandido (solo describe el set, no los datos).
 - **Por qué:** incluir padre e hijos a la vez es el error real más común al armar concept sets, y C (194) es clínicamente completo. B medido en los eventos muestra que, aunque el set tiene muchos conceptos, la base solo usa 2.
+
+## 8. Qué auditar en la búsqueda de conceptos retirados (actividad 7)
+- **Decisión:** dos pasos. (7a) Nuestros concept sets (IC de la actividad 5 y `results.cs_t2dm` C), y (7b) los 4 conceptos de origen retirados que aparecen en `condition_occurrence.condition_source_concept_id`, midiendo el efecto como lista literal vieja contra lista actualizada. Los que no tienen `'Concept replaced by'` se reportan con su relación alternativa y **no** se sustituyen automáticamente.
+- **Alternativas:** solo nuestros sets (tabla vacía, 0 pacientes de diferencia: honesto pero sin corrección que mostrar); solo un concept set de prediabetes armado a mano con el código viejo (muestra el fallo, pero construido a propósito).
+- **Por qué:** en la industria se auditan el set que se usa y los códigos de origen, porque las listas copiadas de protocolos antiguos son las que fallan en silencio. Sustituir un 'D' por su *Maps to* (metástasis → tumor primario de próstata) cambiaría el significado clínico.
