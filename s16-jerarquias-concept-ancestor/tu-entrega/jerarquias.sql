@@ -385,6 +385,117 @@ JOIN cdm.condition_occurrence co
   ON co.condition_concept_id = ca.descendant_concept_id;
 
 -- =====================================================================
+-- Actividad 6. «¿Por qué entró este paciente?» (decisión 10).
+-- =====================================================================
+-- Actividad 6a. Función parametrizable por person_id para la cohorte de
+-- insuficiencia cardiaca (concept set de la actividad 5). Devuelve el
+-- camino evento → concepto de origen → concepto estándar → miembro del
+-- concept set (la rama) con su distancia.
+-- Granularidad: una fila por evento × miembro del set que lo cubre. Un
+-- evento con 4229440 sale 3 veces (una por rama): es la poli-jerarquía
+-- de la actividad 5 vista paciente por paciente, no un error.
+-- Detalles:
+--   · LANGUAGE sql + STABLE: solo lee, el planificador puede integrarla.
+--   · p_person_id (prefijo p_) para no confundirlo con la columna
+--     person_id de condition_occurrence.
+--   · LEFT JOIN con el concepto de origen: si un evento tuviera un
+--     source_concept_id sin fila en concept (o 0), no se pierde.
+--   · Paciente fuera de la cohorte → 0 filas.
+-- Resultado (2026-11-14): crea results.por_que_entro (único objeto que
+--   el lab deja en la base; CREATE OR REPLACE, se puede volver a correr).
+--   Paciente 79 → 3 filas (1 evento × 3 ramas).
+CREATE OR REPLACE FUNCTION results.por_que_entro(p_person_id integer)
+RETURNS TABLE (
+    person_id integer, condition_occurrence_id integer, fecha date,
+    origen_id integer, origen_vocab text, origen_codigo text, origen_nombre text,
+    estandar_id integer, estandar_nombre text,
+    rama_id integer, rama_nombre text, niveles_hasta_rama integer
+)
+LANGUAGE sql STABLE AS $$
+    WITH concept_set(concept_id) AS (
+        VALUES (316139), (319835), (444031)
+    )
+    SELECT co.person_id, co.condition_occurrence_id, co.condition_start_date,
+           co.condition_source_concept_id, src.vocabulary_id::text,
+           src.concept_code::text, src.concept_name::text,
+           co.condition_concept_id, std.concept_name::text,
+           cs.concept_id, rama.concept_name::text,
+           ca.min_levels_of_separation
+    FROM cdm.condition_occurrence co
+    JOIN cdm.concept_ancestor ca
+      ON ca.descendant_concept_id = co.condition_concept_id
+    JOIN concept_set cs ON cs.concept_id = ca.ancestor_concept_id
+    JOIN cdm.concept std  ON std.concept_id  = co.condition_concept_id   -- 1:1
+    JOIN cdm.concept rama ON rama.concept_id = cs.concept_id            -- 1:1
+    LEFT JOIN cdm.concept src ON src.concept_id = co.condition_source_concept_id
+    WHERE co.person_id = p_person_id
+    ORDER BY co.condition_start_date, co.condition_occurrence_id, ca.min_levels_of_separation, cs.concept_id
+$$;
+
+-- Actividad 6b. Salida para los pacientes de la entrega.
+--   79  → 4229440 Chronic congestive HF: 1 evento, entra por 3 ramas.
+--   892 → 316139 Heart failure directo: 1 evento, 1 rama (el padre).
+--   1   → control fuera de la cohorte: 0 filas (no aparece).
+--   273 → elegido por un compañero del grupo: 0 filas, no pertenece a
+--         la cohorte (se verifica en 6d).
+-- CROSS JOIN LATERAL: llama a la función una vez por cada id de la lista
+-- (la función «ve» el pid de la fila de la izquierda).
+-- Resultado (2026-11-14): 4 filas. 79: 4229440 por Congestive (1 nivel),
+--   Chronic (1) y Heart failure (2). 892: 316139, Heart failure (0).
+--   1 y 273 no aparecen (0 filas).
+SELECT r.person_id, r.fecha, r.origen_vocab, r.origen_codigo,
+       r.estandar_id, r.estandar_nombre, r.rama_id, r.rama_nombre,
+       r.niveles_hasta_rama
+FROM unnest(ARRAY[79, 892, 1, 273]) AS p(pid)
+CROSS JOIN LATERAL results.por_que_entro(p.pid) AS r
+ORDER BY r.person_id, r.fecha, r.niveles_hasta_rama, r.rama_id;
+
+-- Actividad 6c. «Funciona para cualquier paciente»: aplicarla a TODAS las
+-- personas de cdm.person y comparar con la actividad 5.
+-- Esperado: filas = A (568), pacientes = C (194), eventos = 194; y las
+-- ramas por evento: 187 eventos con 3 ramas + 7 con 1 rama.
+-- Resultado (2026-11-14): 568 / 194 / 194; 3 ramas: 187, 1 rama: 7.
+-- Tarda ~12 s: la función se llama 5,904 veces (una por persona) y cada
+-- llamada recorre condition_occurrence completa (sin índice en person_id
+-- ni en condition_concept_id, como en la actividad 8). Es una prueba,
+-- no el uso normal: con un paciente tarda ~12 ms.
+WITH todo AS (
+    SELECT r.*
+    FROM cdm.person p
+    CROSS JOIN LATERAL results.por_que_entro(p.person_id) AS r
+), por_evento AS (
+    SELECT condition_occurrence_id, count(*) AS ramas
+    FROM todo GROUP BY condition_occurrence_id
+)
+SELECT (SELECT count(*) FROM todo)                           AS filas,
+       (SELECT count(DISTINCT person_id) FROM todo)          AS pacientes,
+       (SELECT count(*) FROM por_evento)                     AS eventos,
+       (SELECT count(*) FROM por_evento WHERE ramas = 3)     AS eventos_3_ramas,
+       (SELECT count(*) FROM por_evento WHERE ramas = 1)     AS eventos_1_rama;
+
+-- Actividad 6d. «¿Por qué NO entró?» Paciente 273 (elegido por un
+-- compañero): sus diagnósticos y, para cada uno, si es descendiente de
+-- algún miembro del concept set de IC.
+--   · EXISTS (no JOIN): pregunta sí/no sin multiplicar filas; un
+--     concepto bajo 3 ramas seguiría saliendo 1 vez.
+--   · Si el person_id no existiera, saldría 0 filas también aquí; por
+--     eso se cuenta primero que exista en cdm.person.
+-- Resultado (2026-11-14): existe; 12 eventos, todos en_cohorte = false.
+SELECT co.condition_start_date AS fecha,
+       co.condition_concept_id,
+       c.concept_name,
+       EXISTS (
+           SELECT 1 FROM cdm.concept_ancestor ca
+           WHERE ca.descendant_concept_id = co.condition_concept_id
+             AND ca.ancestor_concept_id IN (316139, 319835, 444031)
+       ) AS en_cohorte_ic
+FROM cdm.condition_occurrence co
+JOIN cdm.concept c ON c.concept_id = co.condition_concept_id   -- 1:1 por PK
+WHERE co.person_id = 273                        -- existe en cdm.person (1 fila)
+ORDER BY co.condition_start_date, co.condition_concept_id;
+
+
+-- =====================================================================
 -- Actividad 7. Cazar conceptos muertos (decisión 8).
 -- =====================================================================
 -- Actividad 7a. Auditoría de nuestros concept sets contra
@@ -481,6 +592,7 @@ ORDER BY r.eventos_origen DESC;
 --     repetidos; si los hubiera, el JOIN de 8c multiplicaría filas.
 --   · ANALYZE: da estadísticas al planificador (sin él, supone un
 --     tamaño por defecto para la tabla nueva y estima mal).
+-- Resultado (2026-11-14): cs_ic con 124 filas (= 124 conceptos de 7a).
 DROP TABLE IF EXISTS cs_ic;
 CREATE TEMP TABLE cs_ic (concept_id integer PRIMARY KEY);
 INSERT INTO cs_ic
@@ -491,6 +603,9 @@ ANALYZE cs_ic;
 
 -- Actividad 8b. Versión 1: IN con subconsulta sobre concept_ancestor.
 -- El concept set se recalcula en cada ejecución.
+-- Resultado (2026-11-14): Hash Semi Join; Bitmap Index Scan en
+--   concept_ancestor (176 pares, 180 bloques) + Seq Scan de
+--   condition_occurrence. Mediana 8.08 ms (tiempos.md).
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT count(DISTINCT co.person_id)
 FROM cdm.condition_occurrence co
@@ -502,111 +617,10 @@ WHERE co.condition_concept_id IN (
 
 -- Actividad 8c. Versión 2: JOIN con la tabla materializada.
 -- JOIN (no IN) es seguro porque la PK impide repetidos en cs_ic.
+-- Resultado (2026-11-14): Hash Join; Seq Scan de cs_ic (124 filas,
+--   1 bloque, el índice no se usa) + Seq Scan de condition_occurrence.
+--   Mediana 7.88 ms: sin diferencia medible a esta escala (tiempos.md).
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT count(DISTINCT co.person_id)
 FROM cdm.condition_occurrence co
 JOIN cs_ic cs ON cs.concept_id = co.condition_concept_id;
-
--- =====================================================================
--- Actividad 6. «¿Por qué entró este paciente?» (decisión 10).
--- =====================================================================
--- Actividad 6a. Función parametrizable por person_id para la cohorte de
--- insuficiencia cardiaca (concept set de la actividad 5). Devuelve el
--- camino evento → concepto de origen → concepto estándar → miembro del
--- concept set (la rama) con su distancia.
--- Granularidad: una fila por evento × miembro del set que lo cubre. Un
--- evento con 4229440 sale 3 veces (una por rama): es la poli-jerarquía
--- de la actividad 5 vista paciente por paciente, no un error.
--- Detalles:
---   · LANGUAGE sql + STABLE: solo lee, el planificador puede integrarla.
---   · p_person_id (prefijo p_) para no confundirlo con la columna
---     person_id de condition_occurrence.
---   · LEFT JOIN con el concepto de origen: si un evento tuviera un
---     source_concept_id sin fila en concept (o 0), no se pierde.
---   · Paciente fuera de la cohorte → 0 filas.
-CREATE OR REPLACE FUNCTION results.por_que_entro(p_person_id integer)
-RETURNS TABLE (
-    person_id integer, condition_occurrence_id integer, fecha date,
-    origen_id integer, origen_vocab text, origen_codigo text, origen_nombre text,
-    estandar_id integer, estandar_nombre text,
-    rama_id integer, rama_nombre text, niveles_hasta_rama integer
-)
-LANGUAGE sql STABLE AS $$
-    WITH concept_set(concept_id) AS (
-        VALUES (316139), (319835), (444031)
-    )
-    SELECT co.person_id, co.condition_occurrence_id, co.condition_start_date,
-           co.condition_source_concept_id, src.vocabulary_id::text,
-           src.concept_code::text, src.concept_name::text,
-           co.condition_concept_id, std.concept_name::text,
-           cs.concept_id, rama.concept_name::text,
-           ca.min_levels_of_separation
-    FROM cdm.condition_occurrence co
-    JOIN cdm.concept_ancestor ca
-      ON ca.descendant_concept_id = co.condition_concept_id
-    JOIN concept_set cs ON cs.concept_id = ca.ancestor_concept_id
-    JOIN cdm.concept std  ON std.concept_id  = co.condition_concept_id   -- 1:1
-    JOIN cdm.concept rama ON rama.concept_id = cs.concept_id            -- 1:1
-    LEFT JOIN cdm.concept src ON src.concept_id = co.condition_source_concept_id
-    WHERE co.person_id = p_person_id
-    ORDER BY co.condition_start_date, co.condition_occurrence_id, ca.min_levels_of_separation, cs.concept_id
-$$;
-
--- Actividad 6b. Salida para los pacientes de la entrega.
---   79  → 4229440 Chronic congestive HF: 1 evento, entra por 3 ramas.
---   892 → 316139 Heart failure directo: 1 evento, 1 rama (el padre).
---   1   → control fuera de la cohorte: 0 filas (no aparece).
---   273 → elegido por un compañero del grupo: 0 filas, no pertenece a
---         la cohorte (se verifica en 6d).
--- CROSS JOIN LATERAL: llama a la función una vez por cada id de la lista
--- (la función «ve» el pid de la fila de la izquierda).
-SELECT r.person_id, r.fecha, r.origen_vocab, r.origen_codigo,
-       r.estandar_id, r.estandar_nombre, r.rama_id, r.rama_nombre,
-       r.niveles_hasta_rama
-FROM unnest(ARRAY[79, 892, 1, 273]) AS p(pid)
-CROSS JOIN LATERAL results.por_que_entro(p.pid) AS r
-ORDER BY r.person_id, r.fecha, r.niveles_hasta_rama, r.rama_id;
-
--- Actividad 6c. «Funciona para cualquier paciente»: aplicarla a TODAS las
--- personas de cdm.person y comparar con la actividad 5.
--- Esperado: filas = A (568), pacientes = C (194), eventos = 194; y las
--- ramas por evento: 187 eventos con 3 ramas + 7 con 1 rama.
--- Resultado (2026-11-14): 568 / 194 / 194; 3 ramas: 187, 1 rama: 7.
--- Tarda ~12 s: la función se llama 5,904 veces (una por persona) y cada
--- llamada recorre condition_occurrence completa (sin índice en person_id
--- ni en condition_concept_id, como en la actividad 8). Es una prueba,
--- no el uso normal: con un paciente tarda ~12 ms.
-WITH todo AS (
-    SELECT r.*
-    FROM cdm.person p
-    CROSS JOIN LATERAL results.por_que_entro(p.person_id) AS r
-), por_evento AS (
-    SELECT condition_occurrence_id, count(*) AS ramas
-    FROM todo GROUP BY condition_occurrence_id
-)
-SELECT (SELECT count(*) FROM todo)                           AS filas,
-       (SELECT count(DISTINCT person_id) FROM todo)          AS pacientes,
-       (SELECT count(*) FROM por_evento)                     AS eventos,
-       (SELECT count(*) FROM por_evento WHERE ramas = 3)     AS eventos_3_ramas,
-       (SELECT count(*) FROM por_evento WHERE ramas = 1)     AS eventos_1_rama;
-
--- Actividad 6d. «¿Por qué NO entró?» Paciente 273 (elegido por un
--- compañero): sus diagnósticos y, para cada uno, si es descendiente de
--- algún miembro del concept set de IC.
---   · EXISTS (no JOIN): pregunta sí/no sin multiplicar filas; un
---     concepto bajo 3 ramas seguiría saliendo 1 vez.
---   · Si el person_id no existiera, saldría 0 filas también aquí; por
---     eso se cuenta primero que exista en cdm.person.
--- Resultado (2026-11-14): existe; 12 eventos, todos en_cohorte = false.
-SELECT co.condition_start_date AS fecha,
-       co.condition_concept_id,
-       c.concept_name,
-       EXISTS (
-           SELECT 1 FROM cdm.concept_ancestor ca
-           WHERE ca.descendant_concept_id = co.condition_concept_id
-             AND ca.ancestor_concept_id IN (316139, 319835, 444031)
-       ) AS en_cohorte_ic
-FROM cdm.condition_occurrence co
-JOIN cdm.concept c ON c.concept_id = co.condition_concept_id   -- 1:1 por PK
-WHERE co.person_id = 273                        -- existe en cdm.person (1 fila)
-ORDER BY co.condition_start_date, co.condition_concept_id;
