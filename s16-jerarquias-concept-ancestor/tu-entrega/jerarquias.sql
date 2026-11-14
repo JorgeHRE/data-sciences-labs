@@ -354,3 +354,32 @@ JOIN cdm.concept_ancestor ca
 WHERE s.concept_id = 4274025                                -- termina en Disease
 GROUP BY s.nivel, s.ruta, ca.min_levels_of_separation, ca.max_levels_of_separation
 ORDER BY largo;
+
+-- =====================================================================
+-- Actividad 5. Medir el daño: dos ramas que se traslapan.
+-- =====================================================================
+-- Actividad 5a. Concept set de insuficiencia cardiaca con el padre y sus
+-- dos ramas, todos «con descendientes» (decisión 7):
+--   316139 Heart failure (padre), 319835 Congestive heart failure y
+--   444031 Chronic heart failure (hijos que comparten descendientes).
+-- Cadena de JOINs (orden lógico: FROM/JOIN → WHERE → SELECT):
+--   concept set (3 filas) → concept_ancestor (1 fila por par
+--   ancestro-descendiente: un descendiente compartido aparece una vez por
+--   cada miembro del set que lo tiene debajo) → condition_occurrence
+--   (cada evento se repite tantas veces como pares tenga su concepto).
+--   A cuenta esas filas infladas; B y C quitan los repetidos.
+-- Comprobación de filas: condition_occurrence con los conceptos del set
+-- (sin JOIN con concept_ancestor) = 194 eventos; A > 194 es pura
+-- multiplicación del JOIN.
+-- Resultado (2026-11-14): A 568 / B 2 / C 194.
+WITH concept_set(concept_id) AS (
+    VALUES (316139), (319835), (444031)     -- sin tablas en results
+)
+SELECT count(*)                          AS a_filas_join,
+       count(DISTINCT co.condition_concept_id) AS b_conceptos,
+       count(DISTINCT co.person_id)       AS c_pacientes
+FROM concept_set cs
+JOIN cdm.concept_ancestor ca
+  ON ca.ancestor_concept_id = cs.concept_id     -- incluye nivel 0 (él mismo)
+JOIN cdm.condition_occurrence co
+  ON co.condition_concept_id = ca.descendant_concept_id;

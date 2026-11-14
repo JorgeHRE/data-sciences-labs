@@ -31,3 +31,8 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** el par T2DM 201826 → *Disease* 4274025 (min 4 / max 5), reconstruido con `concept_relationship` excluyendo los conceptos retirados (`concept.invalid_reason IS NULL` en el destino de cada paso, además de la arista vigente).
 - **Alternativas:** el par T2DM → *Clinical finding* 441840 (5/6; la misma idea con un nivel más, casi en la raíz); o reconstruir sin excluir conceptos retirados, que añade un tercer camino de 5 pasos por *Disorder by body site* (retirado en 2021).
 - **Por qué:** los dos caminos tienen lectura clínica directa (la diabetes como enfermedad endocrina y como enfermedad metabólica), y sin conceptos retirados salen exactamente los 2 caminos que describe `concept_ancestor` (4 y 5). La trampa 3 de la actividad 1 solo filtraba aristas retiradas, no conceptos retirados.
+
+## 7. Concept set de insuficiencia cardiaca y cómo contar B (actividad 5)
+- **Decisión:** el padre *Heart failure* 316139 y sus dos ramas, *Congestive* 319835 y *Chronic* 444031, todos con descendientes. B = `condition_concept_id` distintos **de los eventos** (no el tamaño del concept set).
+- **Alternativas:** solo las dos ramas (A 374 / B 1 / C 187: el doble conteo exacto, A = 2 × C, pero deja fuera a los 7 pacientes codificados con el padre); para B, el número de conceptos del set expandido (solo describe el set, no los datos).
+- **Por qué:** incluir padre e hijos a la vez es el error real más común al armar concept sets, y C (194) es clínicamente completo. B medido en los eventos muestra que, aunque el set tiene muchos conceptos, la base solo usa 2.
