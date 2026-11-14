@@ -383,3 +383,83 @@ JOIN cdm.concept_ancestor ca
   ON ca.ancestor_concept_id = cs.concept_id     -- incluye nivel 0 (él mismo)
 JOIN cdm.condition_occurrence co
   ON co.condition_concept_id = ca.descendant_concept_id;
+
+-- =====================================================================
+-- Actividad 7. Cazar conceptos muertos (decisión 8).
+-- =====================================================================
+-- Actividad 7a. Auditoría de nuestros concept sets contra
+-- concept.invalid_reason ('D' = borrado, 'U' = reemplazado, NULL = vigente).
+--   · IC de la actividad 5: los 3 miembros expandidos con concept_ancestor.
+--   · results.cs_t2dm versión C (lab 14).
+-- DISTINCT en IC: un descendiente compartido sale una vez por miembro del
+-- set (la lección de la actividad 5); aquí queremos conceptos, no pares.
+-- JOIN con concept: 1:1 por PK, no multiplica filas.
+-- Resultado (2026-11-14): IC 124 conceptos / 0 retirados;
+--   cs_t2dm C 131 / 0. Por construcción: concept_ancestor solo contiene
+--   conceptos estándar vigentes, así que un set expandido con ella no
+--   puede arrastrar retirados.
+WITH sets AS (
+    SELECT DISTINCT 'IC (act. 5)' AS concept_set, ca.descendant_concept_id AS concept_id
+    FROM cdm.concept_ancestor ca
+    WHERE ca.ancestor_concept_id IN (316139, 319835, 444031)
+    UNION ALL
+    SELECT 'cs_t2dm C (lab 14)', v.concept_id
+    FROM results.cs_t2dm v
+    WHERE v.version = 'C'
+)
+SELECT s.concept_set,
+       count(*)                                          AS conceptos,
+       count(*) FILTER (WHERE c.invalid_reason = 'D')    AS borrados_d,
+       count(*) FILTER (WHERE c.invalid_reason = 'U')    AS reemplazados_u,
+       count(*) FILTER (WHERE c.concept_id IS NULL)      AS sin_fila_en_concept
+FROM sets s
+LEFT JOIN cdm.concept c ON c.concept_id = s.concept_id
+GROUP BY s.concept_set
+ORDER BY s.concept_set;
+
+-- Actividad 7b. Conceptos de ORIGEN retirados (condition_source_concept_id)
+-- y su reemplazo; efecto de usarlos como lista literal (sin
+-- concept_ancestor) antes y después de actualizarla (decisión 8).
+--   · reemplazo: 'Concept replaced by' (LEFT JOIN: los que no lo tienen
+--     se conservan con NULL y NO se sustituyen automáticamente).
+--   · otras_relaciones: alternativas para revisar a mano.
+--   · pac_lista_vieja: pacientes con condition_concept_id = código viejo.
+--     Da 0 porque el ETL ya tradujo a estándar: la consulta corre y
+--     devuelve vacío sin error (el fallo silencioso).
+--   · pac_lista_nueva: pacientes con el reemplazo (todos, no solo los
+--     que venían de ese código de origen). NULL si no hay reemplazo:
+--     no se actualiza, y 0 se confundiría con «no ganó pacientes».
+-- Comprobación de filas: 4 conceptos retirados → 4 filas; cada uno tiene
+-- como máximo 1 'Concept replaced by', así que el LEFT JOIN no duplica.
+-- Resultado (2026-11-14): 4 retirados (3 'U', 1 'D'), 2,284 eventos de
+--   origen. Con 'replaced by': Prediabetes 0 → 2,239 y Pressure ulcer
+--   0 → 1. Sin 'replaced by': Brain damage (U, solo same_as → 4132546)
+--   y la metástasis de próstata (D, solo Maps to → tumor primario).
+WITH retirados AS (
+    SELECT co.condition_source_concept_id AS concept_id,
+           count(*) AS eventos_origen
+    FROM cdm.condition_occurrence co
+    JOIN cdm.concept s ON s.concept_id = co.condition_source_concept_id
+    WHERE s.invalid_reason IS NOT NULL               -- 'D' o 'U'
+    GROUP BY co.condition_source_concept_id
+)
+SELECT r.concept_id, s.concept_name, s.invalid_reason AS ir,
+       r.eventos_origen,
+       rb.concept_id_2 AS reemplazo,
+       (SELECT string_agg(cr.relationship_id || ' → ' || cr.concept_id_2, '; ')
+        FROM cdm.concept_relationship cr
+        WHERE cr.concept_id_1 = r.concept_id AND cr.invalid_reason IS NULL
+          AND cr.relationship_id IN ('Concept same_as to', 'Concept poss_eq to',
+                                     'Concept was_a to', 'Maps to'))  AS otras_relaciones,
+       (SELECT count(DISTINCT person_id) FROM cdm.condition_occurrence
+        WHERE condition_concept_id = r.concept_id)       AS pac_lista_vieja,
+       CASE WHEN rb.concept_id_2 IS NOT NULL THEN   -- sin reemplazo: NULL, no 0
+       (SELECT count(DISTINCT person_id) FROM cdm.condition_occurrence
+        WHERE condition_concept_id = rb.concept_id_2) END AS pac_lista_nueva
+FROM retirados r
+JOIN cdm.concept s ON s.concept_id = r.concept_id                    -- 1:1 por PK
+LEFT JOIN cdm.concept_relationship rb
+  ON rb.concept_id_1 = r.concept_id
+ AND rb.relationship_id = 'Concept replaced by'
+ AND rb.invalid_reason IS NULL
+ORDER BY r.eventos_origen DESC;
