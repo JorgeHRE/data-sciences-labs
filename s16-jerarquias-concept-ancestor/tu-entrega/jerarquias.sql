@@ -463,3 +463,46 @@ LEFT JOIN cdm.concept_relationship rb
  AND rb.relationship_id = 'Concept replaced by'
  AND rb.invalid_reason IS NULL
 ORDER BY r.eventos_origen DESC;
+
+-- =====================================================================
+-- Actividad 8. Antes y después: la misma pregunta escrita de dos formas.
+-- =====================================================================
+-- Pregunta: ¿cuántos pacientes tienen insuficiencia cardiaca? (C de la
+-- actividad 5: 194). Decisión 9: concept set IC, tabla TEMPORAL.
+-- TODO el bloque 8 debe correr en UNA misma sesión de psql: la tabla
+-- temporal solo existe dentro de la sesión que la creó.
+-- Protocolo: 8b y 8c intercaladas tres veces (b, c, b, c, b, c); se
+-- reporta la mediana del Execution Time (tiempos.md).
+
+-- Actividad 8a. Materializar el concept set (124 conceptos).
+--   · DISTINCT: 176 pares ancestro-descendiente → 124 conceptos
+--     (los descendientes compartidos de la actividad 5).
+--   · PRIMARY KEY: crea el índice y además garantiza que no hay
+--     repetidos; si los hubiera, el JOIN de 8c multiplicaría filas.
+--   · ANALYZE: da estadísticas al planificador (sin él, supone un
+--     tamaño por defecto para la tabla nueva y estima mal).
+DROP TABLE IF EXISTS cs_ic;
+CREATE TEMP TABLE cs_ic (concept_id integer PRIMARY KEY);
+INSERT INTO cs_ic
+SELECT DISTINCT ca.descendant_concept_id
+FROM cdm.concept_ancestor ca
+WHERE ca.ancestor_concept_id IN (316139, 319835, 444031);
+ANALYZE cs_ic;
+
+-- Actividad 8b. Versión 1: IN con subconsulta sobre concept_ancestor.
+-- El concept set se recalcula en cada ejecución.
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT count(DISTINCT co.person_id)
+FROM cdm.condition_occurrence co
+WHERE co.condition_concept_id IN (
+    SELECT ca.descendant_concept_id
+    FROM cdm.concept_ancestor ca
+    WHERE ca.ancestor_concept_id IN (316139, 319835, 444031)
+);
+
+-- Actividad 8c. Versión 2: JOIN con la tabla materializada.
+-- JOIN (no IN) es seguro porque la PK impide repetidos en cs_ic.
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT count(DISTINCT co.person_id)
+FROM cdm.condition_occurrence co
+JOIN cs_ic cs ON cs.concept_id = co.condition_concept_id;
