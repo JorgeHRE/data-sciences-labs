@@ -45,3 +45,20 @@ Los largos coinciden con `concept_ancestor` (4/5). Los caminos se separan en *Di
 
 ### Frase clínica
 Es esperable y tiene sentido que la diabetes pertenezca a ambas ramas. Por un lado, la rama endocrina refleja su origen: en la tipo 2, las células β del páncreas no secretan suficiente insulina y los tejidos responden mal a ella (resistencia a la insulina). Por otro, la rama metabólica refleja su consecuencia: sin una acción adecuada de la insulina se altera directamente el metabolismo de los carbohidratos, y por eso se diagnostica midiendo glucosa o HbA1c.
+
+## Actividad 5. Medir el daño
+
+### Concept set (decisión 7)
+*Heart failure* 316139 (padre) + *Congestive heart failure* 319835 + *Chronic heart failure* 444031, todos con descendientes. Las dos ramas se traslapan: en la base solo aparecen *Chronic congestive heart failure* 4229440 (187 pacientes), que es descendiente de los tres miembros del set, y 316139 directo (7 pacientes). Cada paciente tiene 1 evento.
+
+### Los tres números (5a)
+| | Qué cuenta | Resultado |
+|---|---|---|
+| A | `COUNT(*)` sobre el JOIN con `concept_ancestor` | 568 (= 187 × 3 + 7) |
+| B | `COUNT(DISTINCT condition_concept_id)` | 2 |
+| C | `COUNT(DISTINCT person_id)` | **194** |
+
+Comprobación: sin el JOIN (filtrando con `IN`), `condition_occurrence` tiene 194 eventos de 194 pacientes; las 374 filas extra de A son pura multiplicación del JOIN.
+
+### Por qué difieren
+Es una sola consulta con tres formas de contar sobre el mismo JOIN. A usa `COUNT(*)` y cuenta todas las filas del JOIN, por lo que el mismo diagnóstico se repite una vez por cada miembro del set que lo tiene debajo (3 veces para 4229440). B usa `COUNT(DISTINCT condition_concept_id)` y cuenta solo los códigos del set que realmente aparecen en los diagnósticos, por eso da 2: describe las enfermedades registradas, no a los pacientes. Finalmente, C usa `COUNT(DISTINCT person_id)` y es el único que responde «¿cuántos pacientes tienen insuficiencia cardiaca?»: **194**.
