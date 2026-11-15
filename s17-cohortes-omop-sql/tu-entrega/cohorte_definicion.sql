@@ -447,8 +447,100 @@ sin_combinacion AS (
               GROUP BY drug_concept_id
               HAVING count(DISTINCT ingredient_concept_id) > 1)
     )
+),
+-- Actividad 6 (decisiones 13 y 14). Estrategia de salida: fin de la
+-- exposición continua con gap de 30 días (gaps and islands, lab 11).
+-- Idea: ordenar las recetas de cada persona por inicio y marcar «corte»
+-- cuando una receta empieza más de 30 días después del fin más tardío de
+-- TODAS las anteriores; la suma acumulada de los cortes numera las islas
+-- (tramos de exposición continua). Cada isla es un tramo sin huecos > 30.
+--
+-- 6a. tramos: las recetas de las personas que llegaron hasta aquí, con el
+-- número de isla. Dos precauciones heredadas:
+--  · fin máximo acumulado (no LAG): con recetas solapadas, el fin de la
+--    receta inmediatamente anterior puede ser menor que el de una más
+--    antigua y partiría un tramo continuo en dos (lab 11, decisión 3).
+--  · greatest(fin, inicio): 83 / 64 recetas tienen fin < inicio; así su
+--    duración nunca es negativa (igual que en el lavado, actividad 4).
+-- Un hueco de exactamente 30 días NO corta (inicio − fin_previo > 30),
+-- convención de DRUG_ERA de OMOP. Resta de dos date = días (entero).
+-- El JOIN con sin_combinacion es por (cohorte, persona), única en ese
+-- lado: cada receta sale una vez (se comprueba más abajo contando filas).
+tramos AS (
+    SELECT r.cohort_definition_id, r.person_id, r.inicio,
+           greatest(r.fin, r.inicio) AS fin,
+           sum(CASE WHEN fin_previo IS NULL OR r.inicio - fin_previo > 30
+                    THEN 1 ELSE 0 END)
+               OVER (PARTITION BY r.cohort_definition_id, r.person_id
+                     ORDER BY r.inicio, r.fin
+                     ROWS UNBOUNDED PRECEDING) AS isla
+    FROM (
+        SELECT r.*,
+               max(greatest(r.fin, r.inicio))
+                   OVER (PARTITION BY r.cohort_definition_id, r.person_id
+                         ORDER BY r.inicio, r.fin
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+                   AS fin_previo
+        FROM recetas r
+        JOIN sin_combinacion s USING (cohort_definition_id, person_id)
+    ) r
+),
+-- 6b. tramo_indice: el tramo que contiene la fecha índice. Como el índice es
+-- la primera receta de la historia (actividad 2b), ese tramo es el primero
+-- (isla = 1) y empieza en el índice. Su fin es el fin más tardío de las
+-- recetas del tramo. Los tramos posteriores (quien volvió tras un hueco
+-- > 30 días) no cuentan: la salida es el FIN DE LA EXPOSICIÓN CONTINUA
+-- desde el índice. GROUP BY → una fila por persona y cohorte.
+tramo_indice AS (
+    SELECT cohort_definition_id, person_id, max(fin) AS fin_tramo
+    FROM tramos
+    WHERE isla = 1
+    GROUP BY cohort_definition_id, person_id
+),
+-- 6c. otro_post: el primer día que la persona empieza el OTRO fármaco
+-- después del índice (decisión 14). El día del índice no cuenta: quien lo
+-- empezó antes o ese día ya quedó fuera en la actividad 5. Mismo
+-- concept_ancestor que el criterio 5e, pero con inicio > fecha_indice.
+-- LEFT JOIN al final: la mayoría nunca lo empieza → NULL, y NULL no
+-- recorta nada (least() ignora los NULL en Postgres).
+otro_post AS (
+    SELECT s.cohort_definition_id, s.person_id,
+           min(de.drug_exposure_start_date) AS fecha_otro
+    FROM sin_combinacion s
+    JOIN results.cohorte_parametros p USING (cohort_definition_id)
+    JOIN cdm.concept_ancestor ca ON ca.ancestor_concept_id = p.ingrediente_otro
+    JOIN cdm.drug_exposure de    ON de.drug_concept_id = ca.descendant_concept_id
+    WHERE de.person_id = s.person_id
+      AND de.drug_type_concept_id = 32838
+      AND de.drug_exposure_start_date > s.fecha_indice
+    GROUP BY s.cohort_definition_id, s.person_id
+),
+-- 6d. salida: la fecha de salida es el MÍNIMO de tres fechas (trampa del
+-- enunciado: nunca seguir a nadie más allá de donde llegan los datos):
+--   1. fin del tramo + 30 días de persistencia (decisión 13)
+--   2. fin del periodo de observación (op_fin, que viene de obs_previa)
+--   3. inicio del otro fármaco (decisión 14), si lo hay
+-- least() en Postgres ignora NULL (a diferencia de otros motores), así que
+-- fecha_otro NULL simplemente no participa. Una fecha NULL en greatest/least
+-- en SQL Server o Oracle daría NULL: cuidado al portar.
+-- motivo: cuál de las tres fue la que ganó; en un empate gana la primera de
+-- la lista (otro fármaco > fin de observación > fin de exposición).
+salida AS (
+    SELECT s.cohort_definition_id, s.person_id, s.fecha_indice, s.op_fin,
+           t.fin_tramo, o.fecha_otro,
+           least(t.fin_tramo + 30, s.op_fin, o.fecha_otro) AS fecha_salida
+    FROM sin_combinacion s
+    JOIN tramo_indice t USING (cohort_definition_id, person_id)
+    LEFT JOIN otro_post o USING (cohort_definition_id, person_id)
+),
+salida_motivo AS (
+    SELECT *,
+           CASE WHEN fecha_salida = fecha_otro THEN 'otro fármaco'
+                WHEN fecha_salida = op_fin     THEN 'fin de observación'
+                ELSE 'fin de exposición + 30 d' END AS motivo
+    FROM salida
 )
--- Resultado (2026-11-15), 44 filas (11 pasos × 4 cohortes), ~17 s;
+-- Resultado (2026-11-15), 48 filas (12 pasos × 4 cohortes), ~18 s;
 -- filas = distintos en todas:
 --   paso                         1701    1702  |  1711    1712 (sensibilidad)
 --   0 recetas del fármaco      42,085  34,475  | 42,085  34,475
@@ -462,6 +554,7 @@ sin_combinacion AS (
 --   5d − demencia previa          172     164  |    409     329
 --   5e − otro fármaco previo      122      81  |    246     131
 --   5f − combinación en índice    122      81  |    242     131
+--   6 con fecha de salida         122      81  |    242     131  (una por persona)
 -- Actividad 5 (decisiones 11 y 12). Cohorte final de la definición
 -- principal: 122 lisinopril y 81 amlodipino (35 % y 34 % de las 346 / 238).
 -- Pérdida de cada criterio en secuencia (lisinopril / amlodipino):
@@ -477,6 +570,29 @@ sin_combinacion AS (
 -- personas que sobrevivían a HTA y visitas con un producto combinado (4289:
 -- lisinopril/HCTZ; 4506: amlodipino/benazepril) ya tomaban el otro fármaco
 -- y salen en 5e. El criterio sí funciona: en la sensibilidad (1711) quita 4.
+-- Actividad 6 (decisiones 13 y 14). Salida = mínimo entre fin del tramo + 30,
+-- fin de la observación y primer día del otro fármaco. La distribución está
+-- en distribucion_salida.sql; duración en días desde el índice:
+--   cohorte  motivo                     personas  mediana  [q1 – q3]
+--   1701     todos                          122      928   30 – 1,869
+--            fin de observación              61    1,853   1,127 – 2,597
+--            fin de exposición + 30 d        21    1,143   30 – 2,256
+--            otro fármaco                    40       30   30 – 60
+--   1702     todos                           81      401   30 – 1,514
+--            fin de observación              36    1,476   723 – 2,123
+--            fin de exposición + 30 d        19    1,484   202 – 2,226
+--            otro fármaco                    26       30   30 – 30
+--   (1711 / 1712, sensibilidad: mediana 2,629 / 1,505; 42 / 30 por otro fármaco)
+--   Validaciones: 0 salidas antes del índice y 0 después del fin de la
+--   observación en las cuatro cohortes; todos los tramos empiezan en el
+--   índice. Contraste independiente: sin el corte por otro fármaco, la
+--   mediana de la salida da 1,514 / 1,484 (1701 / 1702) y 2,964 / 2,226
+--   (1711 / 1712), igual que una consulta de islas escrita aparte.
+--   Lectura: el 33 % (lisinopril) y el 32 % (amlodipino) salen por empezar
+--   el otro fármaco, con una mediana de exactamente 30 días: es el
+--   añadido en la primera renovación, no un cambio tardío. Esas 66 personas
+--   aportan 98 días o menos de seguimiento. Solo el 57 % y 56 % superan un
+--   año (69 de 122 y 45 de 81).
 -- Las visitas se cuentan por fila, no por día distinto. Contar días
 -- distintos cambia 0 personas en 1701/1702 (173 y 165 en ambos) y quita 9 y
 -- 1 en la sensibilidad 1711/1712 (421 → 412, 340 → 339): no afecta a la
@@ -549,6 +665,10 @@ UNION ALL
 SELECT '5f − combinación en el índice', cohort_definition_id,
        count(*), count(DISTINCT person_id)
 FROM sin_combinacion GROUP BY cohort_definition_id
+UNION ALL
+SELECT '6 con fecha de salida', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM salida_motivo GROUP BY cohort_definition_id
 ORDER BY paso, cohort_definition_id;
 -- [FIN cohorte] ========================================================
 
