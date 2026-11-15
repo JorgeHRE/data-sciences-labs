@@ -37,3 +37,22 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** la construcción de la cohorte es un único bloque `WITH`, delimitado por los marcadores `-- [INICIO cohorte]` y `-- [FIN cohorte]`. Cada actividad añade un CTE que lee solo del anterior (`recetas` → `evento_inicial` → …), y el `SELECT` final cuenta cada paso por cohorte: es la tabla de atrición en construcción.
 - **Alternativas:** una vista por componente en `results` (cada paso se prueba solo, pero ya no son CTE y deja varios objetos en la base); una tabla temporal por paso (rápido de depurar, pero el resultado depende de haber corrido los pasos anteriores en la misma sesión).
 - **Por qué:** es lo que pide el enunciado («un CTE por componente») y la forma del SQL que genera ATLAS. Como cada CTE lee solo del anterior, quien sale en un paso no puede volver a entrar. La cadena completa corre en menos de un segundo, así que repetirla en cada prueba no cuesta nada.
+
+## 8. Observación previa con JOIN (y no EXISTS)
+- **Decisión:** el CTE `obs_previa` une `evento_inicial` con `observation_period` exigiendo, sobre **el mismo** periodo, inicio ≤ índice − 365 y fin ≥ índice, y se lleva `op_inicio` y `op_fin`.
+- **Alternativas:** `EXISTS` con la misma condición (no puede multiplicar nunca, pero no trae columnas: la actividad 6 tendría que volver a unir `observation_period` repitiendo la condición).
+- **Por qué:** la censura de la actividad 6 necesita `op_fin`. El JOIN no multiplica porque en OMOP los periodos de una persona no se solapan y como mucho uno contiene la fecha índice; se comprueba en cada corrida con filas = personas distintas.
+
+## 9. Qué hacer con un OBSERVATION_PERIOD que no corrige el pico de 2016
+- **Decisión:** fecha de **inicio del estudio en 2017-01-01** para la definición principal (1701 lisinopril, 1702 amlodipino), como columna `inicio_estudio` de la tabla de parámetros y CTE `periodo_estudio` aplicado después del evento inicial. Como sensibilidad, las mismas cohortes sin esa fecha (1711, 1712).
+- **Alternativas medidas** (lisinopril / amlodipino, antes de los demás criterios):
+
+  | Opción | Personas | En 2016 | Demencias incidentes |
+  |---|---|---|---|
+  | a · periodo tal cual | 1,522 / 1,104 | 665 / 545 | 60 / 38 |
+  | b · periodo reconstruido desde visitas (hueco ≤ 365 d) | 420 / 286 | 106 / 84 | — |
+  | c · además ≥ 1 visita en [−365, −1] | 785 / 576 | 260 / 224 | 25 / 18 |
+  | **d · índice desde 2017-01-01** | **346 / 238** | **0 / 0** | **3 / 2** |
+
+- **Por qué:** el periodo dura décadas (mediana 31.6 años), así que «365 días de observación» se cumple siempre (pérdida 0) sin probar observación real: antes de 2016 solo ~1 de cada 4 «observados» tiene visitas (control 0c). El pico de primeras recetas de 2015-2016 son usuarios previos que aparecen como nuevos cuando empieza el registro detallado. Solo d lo elimina, y por construcción: el año previo de todo índice desde 2017 cae en 2016 o después (84-94 % con visitas). c no lo corrige (una visita en 2015 no prueba ausencia de recetas cuando no se exportaban) y b inventa una regla y deja 106/84 en 2016. Es lo que se hace con datos reales: limitar el estudio a los años en que la fuente es confiable.
+- **Costo, reportado y no corregido:** quedan 3 / 2 demencias incidentes. Elegir a o c para conservar casos sería aflojar la definición hasta obtener un número bonito, el sesgo que el diseño quiere evitar. Conclusión: la cohorte es válida, pero esta base no permite estudiar la demencia.
