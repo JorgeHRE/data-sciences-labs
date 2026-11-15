@@ -6,6 +6,7 @@ Contenido de este documento (se completa actividad por actividad):
 
 1. [Factibilidad a posteriori](#1-factibilidad-a-posteriori)
 2. [Tabla de atrición](#2-tabla-de-atrición)
+3. [El orden importa](#3-el-orden-importa)
 
 ---
 
@@ -108,3 +109,53 @@ Las banderas se validaron contra `results.cohort` del lab 17 comparando **person
 **Tres criterios no quitaron a nadie** (observación previa, lavado y edad ≥ 18), ni siquiera en las 1,522 personas con primera receta: la observación previa de 365 días no filtra porque `observation_period` abarca toda la historia (lab 17, control 0a), y el lavado no quita a nadie por construcción porque el índice es la primera receta de toda la historia. Son criterios correctos de la definición que, en esta base, no cambian el resultado.
 
 **Advertencia sobre estas lecturas:** el costo de cada criterio depende del orden en que se aplicó. Que el inicio de estudio sea el más caro es en parte porque va primero; la actividad 3 lo comprueba reordenando.
+
+---
+
+## 3. El orden importa
+
+Código: [`orden_b.sql`](orden_b.sql), [`consulta_aislado.sql`](consulta_aislado.sql), [`contraejemplo_indice.sql`](contraejemplo_indice.sql) y [`tabla_orden.py`](tabla_orden.py), que genera [`atricion_ordenes.md`](atricion_ordenes.md) (con 1702 completo) y comprueba lo que se afirma aquí.
+
+### Qué se reordenó
+
+Dos criterios clínicos: **«≥ 2 visitas en [−365, −1]»** y **«sin otro fármaco previo»** (decisión 8). En el orden A (el del lab 17) las visitas van en el paso 6 y el otro fármaco en el 8; en el orden B se intercambian. Los demás pasos no se mueven, así que las tablas son idénticas hasta el paso 5.
+
+### Las dos tablas, lado a lado (lisinopril, 1701)
+
+| paso | orden A: criterio | N | pérdida | orden B: criterio | N | pérdida |
+|---:|---|---:|---:|---|---:|---:|
+| 0 | primera receta (toda la historia) | 1,522 | — | primera receta (toda la historia) | 1,522 | — |
+| 1 | índice desde 2017-01-01 | 346 | −1,176 | índice desde 2017-01-01 | 346 | −1,176 |
+| 2 | + 365 d de observación previa | 346 | −0 | + 365 d de observación previa | 346 | −0 |
+| 3 | + lavado de 365 d | 346 | −0 | + lavado de 365 d | 346 | −0 |
+| 4 | + edad ≥ 18 | 346 | −0 | + edad ≥ 18 | 346 | −0 |
+| 5 | + hipertensión (−∞, 0] | 320 | −26 | + hipertensión (−∞, 0] | 320 | −26 |
+| 6 | **+ ≥ 2 visitas en [−365, −1]** | 173 | **−147** | **− otro fármaco previo** | 257 | **−63** |
+| 7 | − demencia previa | 172 | −1 | − demencia previa | 255 | −2 |
+| 8 | **− otro fármaco previo** | 122 | **−50** | **+ ≥ 2 visitas en [−365, −1]** | 122 | **−133** |
+| 9 | − combinación en el índice | 122 | −0 | − combinación en el índice | 122 | −0 |
+
+### Verificación: el N final es el mismo
+
+**El N final es 122 en los dos órdenes** (y 81 en 1702, donde el orden B da 135 → 81 en lugar de 165 → 81). La pérdida total también coincide (1,400). Los criterios son **independientes** en el sentido que importa: cada bandera depende solo de la persona y de su fecha índice, no de quién más se quedó antes. El N final es el tamaño de la **intersección** de los nueve conjuntos de personas que cumplen cada criterio, y una intersección no depende del orden en que se calcula. Si el N final cambiara al reordenar, algún criterio estaría usando información de los pasos previos (por ejemplo, contar visitas solo entre quienes ya sobrevivieron un filtro) y la definición dependería del orden, no solo la tabla.
+
+### Lo que sí cambia: el «costo» de cada criterio
+
+| criterio (1701) | falla solo, de las 1,522 | pérdida en orden A | pérdida en orden B |
+|---|---:|---:|---:|
+| índice desde 2017-01-01 | 1,176 | 1,176 | 1,176 |
+| hipertensión (−∞, 0] | 75 | 26 | 26 |
+| **≥ 2 visitas en [−365, −1]** | 1,035 | **147** | **133** |
+| demencia previa | 18 | 1 | 2 |
+| **otro fármaco previo** | 576 | **50** | **63** |
+| combinación en el índice | 14 | 0 | 0 |
+
+- Los dos criterios intercambiados cambian: «otro fármaco» pasa de costar 50 a 63 al ir antes, y las visitas de 147 a 133 al ir después. En amlodipino el efecto es mayor: «otro fármaco» pasa de 83 a 102 y las visitas de 72 a 54.
+- **También cambia un criterio que no se movió:** «demencia previa» pasa de −1 a −2 (en amlodipino, de −1 a 0). Se explica por el único paso distinto antes de ella, el 6: en el orden A ahí van las visitas, y una persona con demencia previa y pocas visitas salía ya en ese paso; en el B ahí va «otro fármaco», y esa persona sigue hasta que la quita la demencia. En amlodipino ocurre lo contrario: la persona con demencia previa ya había salido por «otro fármaco», que ahora va antes. Esto es lo que impide hablar de un costo «propio» de cada criterio.
+- La columna «falla solo» es el otro extremo: sin importar el orden, las visitas dejarían fuera a **1,035** de las 1,522 personas. En secuencia solo cuestan 147 o 133 porque la mayoría ya salió por el inicio de estudio (muchas de las primeras recetas son anteriores a 2017, cuando casi no hay visitas registradas). El costo en una tabla de atrición **no es una propiedad del criterio**: es la parte de su efecto que los pasos anteriores no habían ya producido.
+
+**Por eso el orden se declara**: «las visitas costaron 147 personas» sin decir en qué paso se aplicaron no se puede reproducir ni comparar. Para comparar criterios sin que el orden decida, hay que mirar la columna «falla solo» o reportar varios órdenes.
+
+### Lo que no es reordenar: el índice
+
+Hay un cambio que **sí** alteraría el N final y que no es un criterio más: filtrar por fecha **antes** de tomar la primera receta. Cambia cuál es el índice: 1,233 personas en 1701 y 934 en 1702 tendrían alguna receta desde 2017, contra 346 y 238 con la primera de toda la historia. La diferencia (887 y 696) son usuarios previos que pasarían por «nuevos». Por eso en la actividad 2 la primera receta es el paso 0 y no una bandera.

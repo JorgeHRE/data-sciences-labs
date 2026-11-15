@@ -37,12 +37,15 @@ def bloque_banderas():
     return m.group(0)
 
 
+def leer_sql(*archivos, con=None):
+    """Ejecuta el bloque de banderas seguido de los archivos SQL dados."""
+    partes = [bloque_banderas()] + [(AQUI / a).read_text(encoding="utf-8") for a in archivos]
+    return pd.read_sql(_sin_comentarios("\n".join(partes)), con or motor())
+
+
 def leer_atricion(archivo_orden, con=None):
     """DataFrame: cohorte, paso, criterio, n, perdidos, pct_inicial, pct_perdida."""
-    partes = [bloque_banderas(),
-              (AQUI / archivo_orden).read_text(encoding="utf-8"),
-              (AQUI / "consulta_atricion.sql").read_text(encoding="utf-8")]
-    return pd.read_sql(_sin_comentarios("\n".join(partes)), con or motor())
+    return leer_sql(archivo_orden, "consulta_atricion.sql", con=con)
 
 
 def a_markdown(df):
