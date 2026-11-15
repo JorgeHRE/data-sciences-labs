@@ -95,3 +95,7 @@ Las cohortes están en `results.cohort` (cuatro columnas estándar de OMOP; `sub
 ## Resultado de la actividad 8 (atrición)
 
 La tabla completa y el análisis están en [atricion.md](atricion.md). Resumen de la definición principal (lisinopril / amlodipino): 1,522 / 1,104 personas con evento inicial → 346 / 238 con índice desde 2017 → 173 / 165 tras la inclusión → **122 / 81** tras la exclusión (8.0 % y 7.3 %). Costó más el inicio de estudio (77 %), y entre los criterios clínicos, las visitas en lisinopril y el otro fármaco en amlodipino. En esas cohortes no hay demencias incidentes en el seguimiento (0 en 373 y 216 años-persona), así que esta base no permite estudiar el desenlace.
+
+## Resultado de la actividad 9 (caracterización)
+
+La tabla 1 y la figura del seguimiento están en [caracterizacion.md](caracterizacion.md). Cohortes jóvenes (mediana de 40 y 44 años), mujeres alrededor del 58 %, seguimiento mediano de 2.5 y 1.1 años (42 % y 41 % salen en los primeros 6 meses). 8 de 17 filas tienen |SMD| > 0.1, pero con 122 y 81 personas el SMD es ruidoso (error típico ≈ 0.14). La ventana de 365 días subestima las enfermedades crónicas (decisión 18).
