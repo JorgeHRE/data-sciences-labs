@@ -48,10 +48,10 @@ Criterios de exclusión:
 - **Combinación en el día índice.** El producto del índice tiene más de un ingrediente (lisinopril/HCTZ, amlodipino/benazepril, Tribenzor): inicia dos clases a la vez aunque la otra no sea el comparador. Se excluye (decisión 12). En las cohortes principales quita 0, porque las dos personas que sobrevivían hasta ahí ya tomaban el otro fármaco y salen por el criterio anterior; en la sensibilidad quita 4.
 
 ### 3. Estrategia de salida
-La persona sale de la cohorte cuando termina la exposición continua al fármaco del índice. Las recetas se unen en un tramo continuo si entre el fin de una y el inicio de la siguiente hay 30 días o menos. La fecha de salida es el fin del tramo que empieza en la fecha índice. *(Pendiente para la actividad 6: si al fin del tramo se suman 30 días de persistencia, y si empezar el otro fármaco después del índice también termina la permanencia.)*
+La persona sale de la cohorte cuando termina la exposición continua al fármaco del índice. Las recetas se unen en un tramo continuo si entre el fin de una y el inicio de la siguiente hay 30 días o menos (se usa el fin más tardío de todas las recetas anteriores, no solo el de la inmediata, para que un solape no parta un tramo; un hueco de exactamente 30 días no corta). El tramo de interés es el que empieza en la fecha índice; si la persona vuelve tras un hueco mayor, ese tramo posterior no cuenta. A su fin se suman **30 días de persistencia** (decisión 13): la última receta puede haberse agotado sin que la persona haya dejado el fármaco, y así quien tiene una receta de 0 días (fin = inicio, «en curso» del ETL: 12 y 5 personas) no sale el mismo día del índice. Además, la persona sale el día en que **empieza el otro fármaco** después del índice (decisión 14): ya no es usuaria de uno solo y el desenlace no se atribuiría a un fármaco.
 
 ### 4. Censura
-El seguimiento nunca pasa del fin del periodo de observación de la persona: la fecha de salida es la menor entre el fin de la exposición continua y el fin de la observación. Después de esa fecha la base no registra eventos, así que una demencia posterior no se vería.
+El seguimiento nunca pasa del fin del periodo de observación de la persona: la fecha de salida es la **menor** entre las tres fechas (fin del tramo + 30 días, inicio del otro fármaco, fin de la observación). Después de esa fecha la base no registra eventos, así que una demencia posterior no se vería.
 
 ## Resultado de la actividad 5 (inclusión y exclusión)
 
@@ -68,3 +68,22 @@ Cada criterio lee solo del anterior, así que el reparto de la pérdida depende 
 | Combinación en el índice | exclusión, día 0 | 122 / 81 | 0 / 0 | |
 
 Cohorte tras la actividad 5: **122 de lisinopril y 81 de amlodipino**. La salida (actividad 6) todavía no se aplica.
+
+## Resultado de la actividad 6 (salida)
+
+Duración del seguimiento en días desde la fecha índice, por motivo de salida (definición principal; el detalle está en `distribucion_salida.sql`):
+
+| Cohorte | Motivo | Personas | Mediana | Cuartiles |
+|---|---|---|---|---|
+| Lisinopril | fin de observación | 61 | 1,853 | 1,127 – 2,597 |
+| | fin de exposición + 30 d | 21 | 1,143 | 30 – 2,256 |
+| | otro fármaco | 40 | 30 | 30 – 60 |
+| | **todos** | **122** | **928** | 30 – 1,869 |
+| Amlodipino | fin de observación | 36 | 1,476 | 723 – 2,123 |
+| | fin de exposición + 30 d | 19 | 1,484 | 202 – 2,226 |
+| | otro fármaco | 26 | 30 | 30 – 30 |
+| | **todos** | **81** | **401** | 30 – 1,514 |
+
+Validaciones: 0 salidas antes del índice y 0 después del fin de la observación. La mediana sin el corte por otro fármaco (1,514 y 1,484 días) coincide con una consulta de islas escrita aparte.
+
+Lo que más pesa es el otro fármaco: el 33 % y el 32 % salen por empezarlo, con una mediana de exactamente 30 días (el añadido en la primera renovación). Esas 66 personas aportan 98 días o menos de seguimiento. Solo el 57 % y el 56 % superan un año. Para un desenlace como la demencia, de aparición lenta, eso limita lo que esta base puede decir (decisión 14).

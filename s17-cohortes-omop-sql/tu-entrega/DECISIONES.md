@@ -72,3 +72,13 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** excluir a quien inicia con un producto de más de un ingrediente (se cuentan ingredientes distintos en `drug_strength`), como criterio aparte tras el del otro fármaco.
 - **Alternativas:** mantenerlas y reportarlas como limitación.
 - **Por qué:** lisinopril/HCTZ y amlodipino/benazepril inician dos clases a la vez, aunque la otra no sea el comparador, y amlodipino/benazepril contamina el comparador con un IECA. En las cohortes principales el criterio quita 0 (122 y 81 antes y después) porque las dos personas afectadas que llegaban hasta ahí ya salían por tomar el otro fármaco; se comprobó persona por persona (4289 y 4506). Se deja explícito porque la definición debe decirlo, y porque en la sensibilidad (1711) quita 4. Cohorte tras la actividad 5: **122 / 81**.
+
+## 13. Persistencia: sumar 30 días al fin del tramo
+- **Decisión:** la fecha de salida usa el fin del tramo continuo más 30 días de persistencia (tope: el fin de la observación). El tramo se construye con *gaps and islands*: fin máximo acumulado (no `LAG`), corte si `inicio − fin_previo > 30`, y `greatest(fin, inicio)` para las 83 / 64 recetas con fin < inicio.
+- **Alternativa:** salida = fin del tramo, sin extra (mediana 1,484 / 1,454 días).
+- **Por qué:** 12 usuarios de lisinopril y 5 de amlodipino tienen la receta de 0 días del ETL («en curso») y saldrían el día del índice con seguimiento cero, sin poder tener nunca el desenlace. Los 30 días de persistencia reconocen que la última receta puede haberse agotado sin haber dejado el fármaco. Costo: cuenta como expuesto a quien lo dejó hasta 30 días antes.
+
+## 14. Cortar la salida al empezar el otro fármaco
+- **Decisión:** la salida es el mínimo entre fin del tramo + 30, fin de la observación y el primer día en que empieza el otro fármaco después del índice.
+- **Alternativa:** no cortar (conserva todo el seguimiento, pero quien añade el otro fármaco sigue contando como «usuario de uno solo» durante años y las cohortes se mezclan).
+- **Por qué:** el 32 % y el 30 % lo empiezan, con mediana de 30 días (el añadido en la primera renovación). Sin cortar, una comparación lisinopril contra amlodipino compararía grupos que tomaron ambos. Costo, reportado: la mediana baja de 1,514 a 928 días en lisinopril y de 1,484 a 401 en amlodipino; hay sesgo posible (quien necesita un segundo fármaco suele tener la presión peor controlada) y el criterio se aplica igual a las dos cohortes. Validado: 0 salidas antes del índice y 0 después del fin de la observación.
