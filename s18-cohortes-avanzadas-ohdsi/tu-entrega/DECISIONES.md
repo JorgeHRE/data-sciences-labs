@@ -27,3 +27,14 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** seguimiento = fecha de salida − fecha índice (`results.cohort`); evento = primera demencia en (índice, salida] en personas sin demencia previa. Como contraste, no como definición, se mide también el seguimiento hasta el fin del `observation_period`.
 - **Alternativas:** medir hasta el fin del periodo de observación (más seguimiento, pero ya no es la cohorte del lab 17); contar registros en lugar de personas.
 - **Por qué:** los conteos auditan la cohorte tal como quedó. El contraste mostró algo que el conteo solo no veía: 2 personas de 1701 tienen demencia después de salir (por el corte al empezar el otro fármaco, decisión 14 del lab 17). El veredicto no cambia (2 eventos < 10), pero el 0 era en parte censura. Se cuentan personas distintas porque un diagnóstico se repite en cada visita.
+
+## 6. Cómo se construye la atrición para poder reordenarla (actividades 2 y 3)
+- **Decisión:** **una bandera (verdadero/falso) por criterio**, calculada sobre las 1,522 / 1,104 personas con primera receta (índice ya fijado). La atrición en cualquier orden es un `AND` acumulado; el orden es una lista `VALUES` en un archivo aparte (`orden_lab17.sql`), así que reordenar no toca el SQL de la consulta. Se valida contra `results.cohort` comparando **personas** (0 de diferencia en los dos sentidos), no solo conteos.
+- **Alternativas:** banderas solo sobre las 346 con índice desde 2017 (más simple, pero el inicio de estudio quedaba fuera del reordenamiento); copiar la cadena de CTE del lab 17 y reordenar CTE (fiel al original, pero cada orden es otra copia y los CTE encadenados leen solo del anterior).
+- **Por qué:** el inicio de estudio es el criterio más caro (77 %) y la demostración de que el orden importa lo necesita. Lo que **no** se puede reordenar es «tomar la primera receta» frente a «filtrar por fecha» (cambia cuál es el índice: 1,233 en vez de 346), y por eso la primera receta queda como paso 0 y no como bandera.
+- **Detalle técnico (decisión menor):** las banderas se calculan con la primera fecha por persona de cada diagnóstico o fármaco (una fila por persona) en lugar de `EXISTS` correlacionados, porque `cdm.*` no tiene índices en `person_id` y esas consultas se colgaban en el lab 17. «Hay un diagnóstico en (−∞, índice]» equivale a «su primera fecha ≤ índice».
+
+## 7. «% del inicial» se calcula contra las 1,522 primeras recetas
+- **Decisión:** el inicial es el paso 0 (primera receta de toda la historia): 1,522 en 1701 y 1,104 en 1702.
+- **Alternativas:** las 346 / 238 con índice desde 2017 (tratar el inicio de estudio como parte de la población, no como criterio).
+- **Por qué:** es el mismo inicial que `atricion.md` del lab 17, así las dos tablas son comparables, y deja visible que el criterio más caro es el inicio de estudio y no uno clínico. Con 346 como inicial la cohorte final sería el 35 % en vez del 8.0 %.
