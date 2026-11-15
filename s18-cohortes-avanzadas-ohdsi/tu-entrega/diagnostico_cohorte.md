@@ -5,6 +5,7 @@ Auditoría de la cohorte de **nuevos usuarios de lisinopril con hipertensión** 
 Contenido de este documento (se completa actividad por actividad):
 
 1. [Factibilidad a posteriori](#1-factibilidad-a-posteriori)
+2. [Tabla de atrición](#2-tabla-de-atrición)
 
 ---
 
@@ -51,3 +52,59 @@ Se probaron dos cosas para saber si el cero es un problema del diseño o de los 
 - **La pregunta (la comparación lisinopril contra amlodipino)** no es el problema: la definición es razonable. El problema es que no ocurre el desenlace.
 
 **No se aflojó ningún criterio ni se rehízo la cohorte para conseguir eventos.** El enunciado pide trabajar con la cohorte que hay y documentar la limitación; esta es la limitación.
+
+---
+
+## 2. Tabla de atrición
+
+Código: [`atricion.sql`](atricion.sql) (banderas), [`orden_lab17.sql`](orden_lab17.sql) (orden de los pasos), [`consulta_atricion.sql`](consulta_atricion.sql) y [`tabla_atricion.py`](tabla_atricion.py), que genera [`atricion_lab17.md`](atricion_lab17.md) con las comprobaciones.
+
+### Cómo se construyó
+
+En lugar de filtrar paso a paso, se calcula **una bandera (verdadero/falso) por criterio** para las personas con primera receta (1,522 en 1701), con el índice ya fijado. La atrición en un orden dado es un `AND` acumulado de esas banderas. Así reordenar los criterios (actividad 3) es cambiar el orden de una lista, sin reescribir el SQL (decisión 6). La primera receta de toda la historia **no** es una bandera: define cuál es el índice (decisión 6).
+
+Las banderas se validaron contra `results.cohort` del lab 17 comparando **personas**, no solo conteos: la tupla (cohorte, persona, fecha índice) coincide en los dos sentidos (0 solo en las banderas, 0 solo en el lab 17, 122 y 81 en común; [`validacion_banderas.sql`](validacion_banderas.sql)). Cada bandera es una fila por persona, así que ningún `JOIN` duplica: filas = personas distintas en todas las cohortes.
+
+**Orden declarado:** el del lab 17. Primero se fija el inicio de estudio y la observación previa, el lavado y la edad (criterios de la ventana); después los clínicos, de la inclusión (hipertensión, visitas) a la exclusión (demencia previa, otro fármaco, combinación). «% del inicial» es contra las 1,522 primeras recetas (decisión 7).
+
+### Lisinopril (1701)
+
+| paso | criterio | N | % del inicial | pérdida respecto al paso anterior |
+|---:|---|---:|---:|---:|
+| 0 | primera receta (toda la historia) | 1,522 | 100.0 % | — |
+| 1 | índice desde 2017-01-01 | 346 | 22.7 % | −1,176 (77.3 %) |
+| 2 | + 365 d de observación previa | 346 | 22.7 % | −0 (0.0 %) |
+| 3 | + lavado de 365 d | 346 | 22.7 % | −0 (0.0 %) |
+| 4 | + edad ≥ 18 | 346 | 22.7 % | −0 (0.0 %) |
+| 5 | + hipertensión (−∞, 0] | 320 | 21.0 % | −26 (7.5 %) |
+| 6 | + ≥ 2 visitas en [−365, −1] | 173 | 11.4 % | −147 (45.9 %) |
+| 7 | − demencia previa | 172 | 11.3 % | −1 (0.6 %) |
+| 8 | − otro fármaco previo | 122 | 8.0 % | −50 (29.1 %) |
+| 9 | − combinación en el índice | 122 | 8.0 % | −0 (0.0 %) |
+
+### Amlodipino (1702)
+
+| paso | criterio | N | % del inicial | pérdida respecto al paso anterior |
+|---:|---|---:|---:|---:|
+| 0 | primera receta (toda la historia) | 1,104 | 100.0 % | — |
+| 1 | índice desde 2017-01-01 | 238 | 21.6 % | −866 (78.4 %) |
+| 2 | + 365 d de observación previa | 238 | 21.6 % | −0 (0.0 %) |
+| 3 | + lavado de 365 d | 238 | 21.6 % | −0 (0.0 %) |
+| 4 | + edad ≥ 18 | 238 | 21.6 % | −0 (0.0 %) |
+| 5 | + hipertensión (−∞, 0] | 237 | 21.5 % | −1 (0.4 %) |
+| 6 | + ≥ 2 visitas en [−365, −1] | 165 | 14.9 % | −72 (30.4 %) |
+| 7 | − demencia previa | 164 | 14.9 % | −1 (0.6 %) |
+| 8 | − otro fármaco previo | 81 | 7.3 % | −83 (50.6 %) |
+| 9 | − combinación en el índice | 81 | 7.3 % | −0 (0.0 %) |
+
+**La tabla cuadra:** la suma de pérdidas es 1,176 + 26 + 147 + 1 + 50 = 1,400 = 1,522 − 122 (1701) y 866 + 1 + 72 + 1 + 83 = 1,023 = 1,104 − 81 (1702); ningún paso aumenta el N. El script lo comprueba y se detiene si algo cambia.
+
+### Qué criterio costó más y si ese precio vale la pena
+
+**El que más costó fue el inicio de estudio** (77.3 % y 78.4 % de las primeras recetas), pero no es un criterio clínico: es una decisión sobre los datos. Antes de 2016 la base «observa» casi sin registros y las primeras recetas se acumulan en 2015-2016 (665 de las 1,522 en 2016 contra 36 en 2017), así que muchos «nuevos usuarios» de entonces ya tomaban el fármaco (lab 17, decisión 9). Sin ese corte la cohorte dejaría de ser de nuevos usuarios, así que el precio vale la pena para esta pregunta. Tiene un costo que aquí se ve: con índice desde 2017 el seguimiento máximo posible es de unos 9.8 años, y para un desenlace de aparición lenta como la demencia eso limita lo que la base puede mostrar (sección 1).
+
+**Entre los criterios clínicos el más caro fue «≥ 2 visitas en el año previo»** en lisinopril (147 de 320, el 45.9 %), y «otro fármaco previo» en amlodipino (83 de 164, el 50.6 %). El de las visitas es el más discutible: su propósito es asegurar que se observaba a la persona (una sola visita puede ser la del propio diagnóstico), pero es un sustituto de la observación real y cuesta casi la mitad de quienes llegaban. Con N = 1 el lab 17 midió que habría quitado 80 en vez de 147 (decisión 11 de ese lab); con N = 3, 207. La exclusión del otro fármaco sí tiene una razón de diseño fuerte (quien inicia los dos no es nuevo usuario de uno solo), así que su costo, aunque alto, es el precio del diseño.
+
+**Tres criterios no quitaron a nadie** (observación previa, lavado y edad ≥ 18), ni siquiera en las 1,522 personas con primera receta: la observación previa de 365 días no filtra porque `observation_period` abarca toda la historia (lab 17, control 0a), y el lavado no quita a nadie por construcción porque el índice es la primera receta de toda la historia. Son criterios correctos de la definición que, en esta base, no cambian el resultado.
+
+**Advertencia sobre estas lecturas:** el costo de cada criterio depende del orden en que se aplicó. Que el inicio de estudio sea el más caro es en parte porque va primero; la actividad 3 lo comprueba reordenando.
