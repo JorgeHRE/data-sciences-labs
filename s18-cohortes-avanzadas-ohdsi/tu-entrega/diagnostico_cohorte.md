@@ -9,6 +9,7 @@ Contenido de este documento (se completa actividad por actividad):
 3. [El orden importa](#3-el-orden-importa)
 4. [Diagrama de flujo](#4-diagrama-de-flujo)
 5. [Incidencia por año y por edad](#5-incidencia-por-año-y-por-edad)
+6. [Qué códigos metieron a la gente](#6-qué-códigos-metieron-a-la-gente)
 
 ---
 
@@ -243,3 +244,51 @@ Todo lo que se ve es información sobre cómo está construida la base, no sobre
 - **Composición de la base**: la cohorte tiene mediana de 40 años y solo el 11 % tiene 65 o más (lab 17), lo que ya limitaba la factibilidad (sección 1).
 
 **Qué se puede concluir sobre los datos:** (a) el pico de 2016 es un artefacto de captura y el inicio de estudio de 2017 es una decisión bien fundamentada; (b) `observation_period` no es una medida fiable de la población observada ni al inicio ni en el último año, y cualquier análisis de tiempo sobre esta base debe declararlo; (c) por edad no hay evidencia sólida de diferencias con este tamaño.
+
+---
+
+## 6. Qué códigos metieron a la gente
+
+Código: [`codigos_indice.sql`](codigos_indice.sql) (cinco consultas) y [`tabla_codigos.py`](tabla_codigos.py), que las ejecuta, comprueba las cifras y genera [`codigos_indice.md`](codigos_indice.md).
+
+### Qué se mide
+
+«Entrar por un código» es el **producto de la receta del día índice** (`drug_concept_id`), dentro del concept set: el ingrediente (lisinopril, amlodipino) y todos sus descendientes en `concept_ancestor`, como en el lab 17. Se cuentan **personas distintas** (decisión 14). Control: cada persona entra por un solo producto (0 personas con más de uno, en las dos cohortes), así que la tabla suma exactamente el N de la cohorte.
+
+### La tabla, ordenada
+
+**Lisinopril (1701), N = 122**
+
+| concept_id | producto | personas | % | % acumulado |
+|---:|---|---:|---:|---:|
+| 19080128 | lisinopril 10 MG Oral Tablet | 120 | **98.4** | 98.4 |
+| 1308251 | lisinopril 5 MG Oral Tablet | 2 | 1.6 | 100.0 |
+
+**Amlodipino (1702), N = 81**
+
+| concept_id | producto | personas | % | % acumulado |
+|---:|---|---:|---:|---:|
+| 19073094 | amlodipine 2.5 MG Oral Tablet | 81 | **100.0** | 100.0 |
+
+**El concepto más frecuente aporta el 98.4 % de la cohorte de lisinopril y el 100 % de la de amlodipino.**
+
+### Lo que esto significa
+
+**Tu definición es, en la práctica, ese código, y el resto del concept set es decorativo.** El concept set de lisinopril tiene **98 conceptos** (el ingrediente y 97 descendientes: productos clínicos y de marca, componentes, formas y grupos de dosis); solo **9** tienen una receta en toda la base y solo **2** son el producto de algún índice. El de amlodipino es aún más inflado: **303 conceptos, 6 con recetas y 1 como índice**. Ninguna marca (*Branded Drug*) tiene una sola receta; la base solo usa productos genéricos (*Clinical Drug*). Que el concept set sea tan grande no hace a la cohorte más sensible a otras presentaciones: simplemente no hay recetas con ellas.
+
+**La concentración no la crea la definición de la cohorte: ya está en la base.** Entre **todas** las recetas, el 98.1 % de las de lisinopril (41,278 de 42,085) y el 99.97 % de las de amlodipino (34,464 de 34,475) son del mismo producto. La definición hereda esa concentración:
+
+| etapa | lisinopril: % del producto más frecuente | amlodipino |
+|---|---:|---:|
+| todas las recetas | 98.1 | 100.0 |
+| primeras recetas (toda la historia) | 93.0 | 99.7 |
+| cohorte sin inicio de estudio | 94.6 | 100.0 |
+| **cohorte final** | **98.4** | **100.0** |
+
+**Un matiz en lisinopril:** el 93.0 % de las primeras recetas sube a 98.4 % en la cohorte final porque quienes inician con **otro producto** (107 personas: otras dosis y combinaciones) casi no llegan: 79 de ellas tienen el índice antes de 2017 (inicio de estudio) y de las 28 restantes solo **2** llegan al final, contra 120 de 318 en quienes inician con 10 mg. Parte es la exclusión de combinaciones (14 personas con lisinopril/hidroclorotiazida, decisión 12 del lab 17); el resto no se investigó.
+
+**Qué implica para la cohorte:**
+
+- **No se puede estudiar la dosis.** Con 98.4 % de los usuarios en 10 mg (y todos los de amlodipino en 2.5 mg, la dosis más baja de las presentaciones habituales, lo cual sugiere que el ETL codifica una presentación única por fármaco), no hay variabilidad de dosis ni de presentación que describir ni usar como covariable.
+- **La definición depende de cómo codifica la base.** Con otra fuente, con marcas o con más dosis, el mismo concept set daría otra cohorte. Para esta base, «nuevo usuario de lisinopril» es en la práctica «nuevo usuario de lisinopril 10 mg en tabletas».
+- **La definición está bien; lo que hay que hacer es declararlo.** Como el concept set por ingrediente + descendientes es la forma estándar de especificar un fármaco, no hace falta cambiarlo: sí hace falta decir que casi no hay variabilidad en su contenido.
