@@ -163,29 +163,42 @@ CREATE TABLE IF NOT EXISTS results.cohorte_parametros (
     cohort_definition_id integer PRIMARY KEY,
     nombre               text    NOT NULL,
     ingrediente_exp      integer NOT NULL,
-    ingrediente_otro     integer NOT NULL
+    ingrediente_otro     integer NOT NULL,
+    inicio_estudio       date             -- NULL = sin fecha de inicio
 );
+-- Actividad 3c (decisión 9): fecha de inicio del estudio. ADD COLUMN IF NOT
+-- EXISTS para bases donde la tabla ya existía sin esta columna.
+ALTER TABLE results.cohorte_parametros
+    ADD COLUMN IF NOT EXISTS inicio_estudio date;
 
+-- 1701/1702: definición principal, índice desde el 2017-01-01 (el año
+-- previo cae ya en el registro detallado, control 0c).
+-- 1711/1712: sensibilidad «tal cual», sin fecha de inicio (NULL, no una
+-- fecha inventada como 1900-01-01, para no introducir un centinela).
 INSERT INTO results.cohorte_parametros VALUES
-    (1701, 'nuevos usuarios de lisinopril', 1308216, 1332418),
-    (1702, 'nuevos usuarios de amlodipino', 1332418, 1308216)
+    (1701, 'nuevos usuarios de lisinopril',                1308216, 1332418, DATE '2017-01-01'),
+    (1702, 'nuevos usuarios de amlodipino',                1332418, 1308216, DATE '2017-01-01'),
+    (1711, 'lisinopril, sensibilidad sin inicio de estudio', 1308216, 1332418, NULL),
+    (1712, 'amlodipino, sensibilidad sin inicio de estudio', 1332418, 1308216, NULL)
 ON CONFLICT (cohort_definition_id) DO UPDATE
     SET nombre           = EXCLUDED.nombre,
         ingrediente_exp  = EXCLUDED.ingrediente_exp,
-        ingrediente_otro = EXCLUDED.ingrediente_otro;
+        ingrediente_otro = EXCLUDED.ingrediente_otro,
+        inicio_estudio   = EXCLUDED.inicio_estudio;
 
 -- Control 2a. Los parámetros apuntan a lo que creemos: ingredientes RxNorm
 -- estándar y vigentes. Un id mal tecleado no daría error: daría una cohorte
 -- vacía o de otro fármaco. Por eso se muestra el nombre desde concept.
 -- Los dos JOIN a concept son por clave primaria (concept_id): 1 fila por
 -- parámetro, no multiplican (2 filas antes, 2 después).
--- Resultado (2026-11-15), 2 filas:
---   1701 lisinopril → exp lisinopril, otro amlodipine
---   1702 amlodipino → exp amlodipine, otro lisinopril
---   los dos: clase Ingredient, standard_concept 'S', invalid_reason NULL.
--- Segunda corrida: «relation already exists, skipping» + INSERT 0 2 y la
--- tabla sigue con 2 filas → re-ejecutable.
-SELECT p.cohort_definition_id, p.nombre,
+-- Resultado (2026-11-15), 4 filas (2 hasta la actividad 3c):
+--   1701 y 1711 → exp lisinopril, otro amlodipine
+--   1702 y 1712 → exp amlodipine, otro lisinopril
+--   todos: clase Ingredient, standard_concept 'S', invalid_reason NULL;
+--   inicio_estudio 2017-01-01 en 1701/1702 y NULL en 1711/1712.
+-- Segunda corrida: «relation already exists, skipping», INSERT 0 4 y la
+-- tabla sigue con 4 filas → re-ejecutable.
+SELECT p.cohort_definition_id, p.nombre, p.inicio_estudio,
        ce.concept_name AS exp,  ce.concept_class_id AS clase_exp,
        ce.standard_concept AS std_exp, ce.invalid_reason AS inv_exp,
        co.concept_name AS otro, co.concept_class_id AS clase_otro
@@ -237,11 +250,68 @@ evento_inicial AS (
            min(inicio) AS fecha_indice
     FROM recetas
     GROUP BY cohort_definition_id, person_id
+),
+-- Actividad 3c. periodo_estudio: la fecha índice cae desde el inicio del
+-- estudio de cada cohorte (decisión 9). 1701/1702: desde 2017-01-01, porque
+-- antes de 2016 la base «observa» sin datos (control 0c) y las primeras
+-- recetas hacen pico en 2015-2016: usuarios que ya lo tomaban y aparecen
+-- como nuevos cuando empieza el registro detallado (figura 3b).
+-- 1711/1712 (sensibilidad): inicio_estudio NULL → no filtra.
+-- Va DESPUÉS de evento_inicial a propósito: primero la primera receta de
+-- TODA la historia, luego se exige que caiga en el periodo. Al revés
+-- (filtrar recetas desde 2017 y tomar la primera) alguien que empezó en
+-- 2015 entraría como «nuevo» en 2018. Medido: con el orden al revés serían
+-- 1,233 / 934 personas en vez de 346 / 238 (887 / 696 usuarios previos).
+-- El JOIN con parámetros es por clave primaria: 1 fila por cohorte, no
+-- multiplica.
+periodo_estudio AS (
+    SELECT e.*
+    FROM evento_inicial e
+    JOIN results.cohorte_parametros p USING (cohort_definition_id)
+    WHERE p.inicio_estudio IS NULL
+       OR e.fecha_indice >= p.inicio_estudio
+),
+-- Actividad 3a. obs_previa: la base observaba a la persona al menos 365
+-- días antes del índice, sin interrupciones (decisión 8).
+-- Las DOS condiciones van sobre el MISMO periodo (trampa 1 del enunciado):
+-- el periodo empieza ≤ índice − 365 Y termina ≥ índice. Con dos periodos
+-- separados, mirar «el inicio más antiguo» y «el fin más reciente» de
+-- periodos distintos aprobaría a alguien con un hueco en medio.
+-- Por qué JOIN y no EXISTS: se necesita op_fin (fin del periodo) para la
+-- censura de la actividad 6. No multiplica: los periodos de una persona no
+-- se solapan (convención OMOP), así que como mucho UNO contiene la fecha
+-- índice. Se comprueba en el SELECT final: filas = personas distintas.
+-- Es un JOIN interno: quien no tiene un periodo así desaparece aquí, que
+-- es justo el filtro.
+-- Resta de fechas: date − integer = date (365 días antes).
+obs_previa AS (
+    SELECT e.cohort_definition_id,
+           e.person_id,
+           e.fecha_indice,
+           op.observation_period_start_date AS op_inicio,
+           op.observation_period_end_date   AS op_fin
+    FROM periodo_estudio e
+    JOIN cdm.observation_period op
+      ON op.person_id = e.person_id
+     AND op.observation_period_start_date <= e.fecha_indice - 365
+     AND op.observation_period_end_date   >= e.fecha_indice
 )
--- Resultado (2026-11-15), 4 filas, < 1 s; filas = distintos en todas:
---   paso                    1701 lisinopril   1702 amlodipino
---   0 recetas del fármaco        42,085            34,475
---   1 evento inicial              1,522             1,104
+-- Resultado (2026-11-15), 16 filas (4 pasos × 4 cohortes), < 1 s;
+-- filas = distintos en todas:
+--   paso                         1701    1702  |  1711    1712 (sensibilidad)
+--   0 recetas del fármaco      42,085  34,475  | 42,085  34,475
+--   1 evento inicial            1,522   1,104  |  1,522   1,104
+--   2 índice en periodo estudio   346     238  |  1,522   1,104
+--   3 + 365 días de observación   346     238  |  1,522   1,104  (pérdida 0)
+-- Actividad 3c: el inicio de estudio quita 1,176 (77.3 %) y 866 (78.4 %);
+-- incluye los 665 / 545 del pico de 2016. Costo: demencias incidentes antes
+-- de los demás criterios 3 / 2 (60 / 38 sin el filtro) → con esta base no
+-- se puede estudiar el desenlace; se reporta, no se afloja (decisión 9).
+-- Actividad 3a: no quita a nadie, y no por poco: días de observación
+-- antes del índice, mínimo 371 / 772 y mediana 13,548 / 13,661 (~37 años);
+-- solo 2 personas con menos de 2 años. Es el periodo de décadas de los
+-- controles 0a-0c: el filtro se cumple siempre, sin probar observación
+-- real (antes de 2016 solo ~1 de cada 4 «observados» tiene visitas).
 -- 42,085 ≠ 42,002 de results.lisinopril_exposicion (lab 13): la diferencia
 -- son las 83 recetas con fin < inicio (days_supply negativo, mínimo −6),
 -- que el lab 13 excluyó. Aquí se conservan porque su fecha de INICIO es
@@ -249,6 +319,8 @@ evento_inicial AS (
 -- (0 en las dos cohortes). Amlodipino tiene 64 (36 personas). Pendiente
 -- para la actividad 6, donde sí importa la duración. Sin fin NULL; fin =
 -- inicio en 1,772 y 1,201 recetas («en curso» del ETL, lab 13).
+-- [CONTEO] Los scripts de figuras cortan el bloque en esta línea y añaden
+-- su propio SELECT: así usan exactamente los mismos CTE.
 -- Conteo de cada paso. «filas» y «distintos» deben coincidir:
 --   recetas:        distintos = drug_exposure_id distintos (JOIN sin duplicar)
 --   evento_inicial: distintos = person_id distintos (trampa del enunciado)
@@ -259,6 +331,14 @@ UNION ALL
 SELECT '1 evento inicial', cohort_definition_id,
        count(*), count(DISTINCT person_id)
 FROM evento_inicial GROUP BY cohort_definition_id
+UNION ALL
+SELECT '2 índice en el periodo de estudio', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM periodo_estudio GROUP BY cohort_definition_id
+UNION ALL
+SELECT '3 + 365 días de observación', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM obs_previa GROUP BY cohort_definition_id
 ORDER BY paso, cohort_definition_id;
 -- [FIN cohorte] ========================================================
 
@@ -296,6 +376,9 @@ WITH recetas AS (
     JOIN cdm.concept_ancestor ca ON ca.ancestor_concept_id = p.ingrediente_exp
     JOIN cdm.drug_exposure d     ON d.drug_concept_id = ca.descendant_concept_id
     WHERE d.drug_type_concept_id = 32838
+      -- 1711/1712 tienen los mismos fármacos: se omiten para no duplicar.
+      -- Describe el evento inicial (antes del periodo de estudio).
+      AND p.cohort_definition_id IN (1701, 1702)
 ),
 indice AS (
     SELECT cohort_definition_id, person_id, min(inicio) AS fecha_indice
