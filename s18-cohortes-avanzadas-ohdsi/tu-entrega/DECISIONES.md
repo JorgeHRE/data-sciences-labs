@@ -56,3 +56,19 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Alternativas:** Mermaid (se escribe en texto y renderiza en GitHub, pero el control de la posición, de las cajas laterales y de la calidad de impresión es mucho menor y la figura no sale de las cifras de la base); dibujarla a mano en una herramienta de diagramas (queda bien, pero no es regenerable y puede divergir de la tabla).
 - **Por qué:** el enunciado pide una figura «en calidad presentable» que «va a la tesis tal cual», y «las figuras regenerables desde el código». Un script con `assert` impide publicar una figura cuyas cifras no coincidan con la tabla. Los pasos con 0 pérdidas como nota evitan cajas repetidas sin ocultar que esos criterios se aplicaron.
 - **Detalle:** la figura quedó con una columna de exclusiones separada de la central; la primera versión tenía las cajas laterales invadiendo la columna del flujo y la última exclusión se superponía con la caja final. Se corrigió tras revisar la imagen.
+
+## 11. Qué «entradas» se grafican por año (actividad 5)
+- **Decisión:** dos paneles: (A) las **1,522 primeras recetas** de lisinopril (el evento inicial, antes de los criterios) y (B) las cohortes **1711** (todos los criterios clínicos, sin inicio de estudio) y **1701** (la cohorte final).
+- **Alternativas:** solo la cohorte final (122), que es literalmente «la incidencia de entrada a tu cohorte» pero solo cubre 2017-2026 y no puede mostrar el pico; solo las primeras recetas, que muestra el artefacto pero no responde qué pasa con quienes sí entraron.
+- **Por qué:** la cohorte final excluye por construcción el periodo donde está el artefacto (índice desde 2017). El panel B añade algo que no se sabía: el pico de 2016 sobrevive a los criterios clínicos (61 entradas en 1711 contra 2 a 4 por año antes), y solo el inicio de estudio lo elimina.
+
+## 12. Denominador de la tasa (actividad 5)
+- **Decisión:** **dos denominadores en el mismo gráfico**: personas-año de `observation_period` (el estándar OHDSI) y personas con al menos una visita en el año. En el último año (parcial) el segundo se pondera por la fracción del año cubierta por los datos (0.82).
+- **Alternativas:** solo `observation_period`; solo personas con visita.
+- **Por qué:** divergen justo donde hay artefactos. Al inicio, `observation_period` declara 3,545 personas-año en 2005 y solo 966 personas tienen una visita; en 2026 sus personas-año caen a 2,285 (el periodo termina en la última visita) y la tasa se dispara a 14.4 (9.2 con visitas). Con un solo denominador esa diferencia no se vería, y ella misma es el hallazgo.
+
+## 13. Decisiones menores de la actividad 5 (de forma)
+- **Edad** = año calendario − `year_of_birth` en el numerador y en el denominador. La misma aproximación en los dos lados mantiene consistente la tasa; la tabla 1 del lab 17 usa edad exacta (difiere en 58 de 203 personas). Solo adultos (≥ 18) en el denominador, porque la cohorte los exige.
+- **Grupos** de 10 años (18-29, …, 70+) en 2017-2026, y **IC 95 % exactos de Poisson**: con 8 a 34 entradas por grupo, una tasa sin intervalo da una precisión que no existe.
+- **Antes de 2005** (250 primeras recetas) no se grafica: la base casi no tiene visitas registradas. **2026** sí se grafica, como año parcial (círculo vacío).
+- **Limitación declarada:** el denominador incluye a quienes ya habían usado lisinopril (no están «en riesgo» de ser nuevos usuarios); subestima sobre todo las tasas de los grupos mayores. No se corrigió: requeriría personas-año en riesgo (excluir lo posterior a la primera receta) y no es lo que pide el enunciado.

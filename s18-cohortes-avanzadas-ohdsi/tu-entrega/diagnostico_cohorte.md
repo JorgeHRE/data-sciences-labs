@@ -8,6 +8,7 @@ Contenido de este documento (se completa actividad por actividad):
 2. [Tabla de atrición](#2-tabla-de-atrición)
 3. [El orden importa](#3-el-orden-importa)
 4. [Diagrama de flujo](#4-diagrama-de-flujo)
+5. [Incidencia por año y por edad](#5-incidencia-por-año-y-por-edad)
 
 ---
 
@@ -187,3 +188,58 @@ Código: [`figura_consort.py`](figura_consort.py). Genera [`figura_consort_1701.
 - **Cada caja nombra el criterio, no solo el número.** Una figura con «N = 320» sin decir qué paso la produjo no se entiende sin la tabla.
 - **El orden es el del lab 17**, y la figura lo dice al pie: el costo de cada criterio depende del orden (sección 3), y un diagrama de flujo siempre fija uno.
 - **Las cifras salen de la base, no se escriben a mano.** El script se detiene si cambian el N inicial o final, o si las pérdidas dibujadas no suman lo que se fue entre el inicio y el final (1,400 en 1701; 1,023 en 1702).
+
+---
+
+## 5. Incidencia por año y por grupo de edad
+
+Código: [`incidencia.sql`](incidencia.sql) (numeradores y denominadores) y [`figura_incidencia.py`](figura_incidencia.py), que calcula las tasas, comprueba las cifras y genera [`figura_incidencia_anio.png`](figura_incidencia_anio.png), [`figura_incidencia_edad.png`](figura_incidencia_edad.png) y [`incidencia_tablas.md`](incidencia_tablas.md) (todas las cifras).
+
+### Qué se mide
+
+Una incidencia es entradas entre el tiempo en que la gente podía entrar: **tasa por 1,000 personas-año**. Para el año calendario se grafican dos cosas (decisión 11): las **primeras recetas** de lisinopril (el evento inicial, antes de los criterios, 1,522 en total) y las cohortes con todos los criterios clínicos, con inicio de estudio (**1701**, 122) y sin él (**1711**, 242). Las primeras recetas son lo único que permite ver el pico del inicio de la base, porque la cohorte final lo excluye por construcción (índice desde 2017). Se usan **dos denominadores** (decisión 12): las personas-año de `observation_period` (el estándar OHDSI) y las personas con al menos una visita en el año (en 2026, ponderadas por la fracción del año cubierta, 0.82). Lo que diferencia a los dos es parte del diagnóstico.
+
+### Por año calendario
+
+![Incidencia por año: primeras recetas de lisinopril y cohortes 1711 y 1701](figura_incidencia_anio.png)
+
+| año | personas-año OP | personas con visita | primeras recetas | tasa (OP) | tasa (visita) | 1711 | 1701 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2005 | 3,545 | 966 | 7 | 2.0 | 7.0 | 0 | 0 |
+| 2013 | 3,997 | 1,528 | 15 | 3.8 | 9.8 | 4 | 0 |
+| 2015 | 4,195 | 2,436 | 116 | 27.7 | 47.6 | 7 | 0 |
+| **2016** | 4,450 | 3,868 | **665** | **149.5** | **171.9** | 61 | 0 |
+| 2017 | 4,732 | 4,541 | 36 | 7.6 | 7.9 | 13 | 13 |
+| 2025 | 4,749 | 4,697 | 43 | 9.1 | 9.2 | 14 | 14 |
+| 2026* | 2,285 | 4,383 | 33 | 14.4 | 9.2 | 8 | 8 |
+
+\* año parcial (datos hasta el 2026-10-26). Cifras de 2005-2026 completas en `incidencia_tablas.md`; antes de 2005 hay 250 primeras recetas que no se grafican.
+
+### Interpretación: qué dicen los datos (no la enfermedad)
+
+Todo lo que se ve es información sobre cómo está construida la base, no sobre la hipertensión ni su tratamiento:
+
+1. **Un pico artificial en 2016.** Las primeras recetas pasan de 7 a 19 por año (2005-2014) a 116 en 2015 y **665 en 2016**, el 44 % de todas las primeras recetas de la historia, y vuelven a 36 en 2017. No fue una epidemia: coincide con el salto de las visitas registradas (de ~4,000 a ~24,000 por año en 2016-2017, lab 17) y con el escalón de las personas con visita (1,528 en 2013, 2,436 en 2015, 3,868 en 2016, 4,541 en 2017). Muchos «nuevos usuarios» de 2015-2016 ya tomaban el fármaco y aparecen como nuevos porque antes no se registraba. **El pico sobrevive a los criterios clínicos**: la cohorte 1711 (todos los criterios, sin inicio de estudio) tiene 61 entradas en 2016, contra 2 a 4 por año en 2008-2014. Por eso el inicio de estudio en 2017 (decisión del lab 17) es lo que lo elimina, y los criterios no.
+2. **`observation_period` sobreestima a la población observada al inicio.** En 2005 declara 3,545 personas-año pero solo 966 personas tienen una visita (27 %). La tasa calculada con `observation_period` (2.0 por 1,000) es 3.5 veces menor que con el denominador de personas con visita (7.0). Las dos líneas convergen hacia 2016-2017, cuando casi todos los observados tienen visitas (control 0c del lab 17). Con el denominador estándar, las tasas anteriores a 2014 están **subestimadas**.
+3. **Un efecto de borde en el último año.** En 2026 la tasa con `observation_period` se dispara a 14.4 (y la de 1701 a 3.5), pero con el denominador de visitas queda en 9.2 (y 2.2): el periodo de observación termina en la última visita de cada persona, así que sus personas-año caen a 2,285 (contra 4,749 en 2025) aunque 4,383 personas tienen visitas ese año. El «aumento» de 2026 es un artefacto del denominador. Los dos denominadores **acotan** la tasa real del año parcial; no se sabe cuál está más cerca.
+4. **Desde 2017 no hay tendencia clara.** Las entradas a 1701 van de 8 a 21 por año (1.6 a 4.3 por 1,000 personas-año); con tan pocos casos, el ruido de Poisson es de alrededor de ±25 %, así que el máximo de 2022 (21 entradas) no se interpreta.
+
+### Por grupo de edad
+
+![Incidencia de entrada por grupo de edad](figura_incidencia_edad.png)
+
+| grupo | personas-año OP | entradas | tasa por 1,000 [IC 95 %] | tasa con visita |
+|---|---:|---:|---:|---:|
+| 18-29 | 7,384 | 34 | 4.60 [3.19–6.43] | 5.11 |
+| 30-39 | 5,848 | 24 | 4.10 [2.63–6.11] | 4.61 |
+| 40-49 | 6,752 | 21 | 3.11 [1.93–4.75] | 3.23 |
+| 50-59 | 6,567 | 19 | 2.89 [1.74–4.52] | 2.79 |
+| 60-69 | 4,383 | 16 | 3.65 [2.09–5.93] | 3.51 |
+| 70+ | 4,440 | 8 | 1.80 [0.78–3.55] | 1.73 |
+
+**Interpretación.** La tasa **baja** con la edad (4.6 en 18-29 contra 1.8 en 70 o más), al revés de lo esperable clínicamente para un fármaco antihipertensivo. Pero los intervalos se superponen casi por completo (solo el primero y el último apenas se rozan: 3.19-6.43 contra 0.78-3.55), así que con 122 entradas esto es, como mucho, una señal débil, y ninguna diferencia entre grupos intermedios es distinguible del azar. Dos explicaciones plausibles, **que esta actividad no distingue**:
+
+- **El denominador no es de personas «en riesgo».** Incluye a quienes ya habían usado lisinopril antes y no pueden ser «nuevos usuarios». Es más probable que sean mayores, así que la tasa de los grupos mayores está subestimada. Un denominador correcto excluiría el tiempo después de la primera receta; con las personas-año de `observation_period` no se hace (limitación de esta tasa).
+- **Composición de la base**: la cohorte tiene mediana de 40 años y solo el 11 % tiene 65 o más (lab 17), lo que ya limitaba la factibilidad (sección 1).
+
+**Qué se puede concluir sobre los datos:** (a) el pico de 2016 es un artefacto de captura y el inicio de estudio de 2017 es una decisión bien fundamentada; (b) `observation_period` no es una medida fiable de la población observada ni al inicio ni en el último año, y cualquier análisis de tiempo sobre esta base debe declararlo; (c) por edad no hay evidencia sólida de diferencias con este tamaño.
