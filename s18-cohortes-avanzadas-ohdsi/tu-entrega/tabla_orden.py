@@ -15,6 +15,7 @@ from atricion_lib import AQUI, NOMBRE, leer_atricion, leer_sql
 a = leer_atricion("orden_lab17.sql")
 b = leer_atricion("orden_b.sql")
 aislado = leer_sql("consulta_aislado.sql").set_index("cohorte")
+marg = leer_sql("consulta_marginal.sql").set_index("cohorte")
 indice = leer_sql("contraejemplo_indice.sql").set_index("cohorte")["con_receta_desde_inicio"]
 
 # criterio → columna de consulta_aislado.sql
@@ -41,6 +42,17 @@ for coh in (1701, 1702):
     for c, col in COL.items():
         assert aislado.loc[coh, col] >= max(pa[c], pb[c]), (coh, c)
     assert aislado.loc[coh, "inicial"] == ga["n"].iloc[0]
+    # 6. Costo marginal (N sin el criterio − N final): no depende del orden y es
+    #    ≤ lo que el criterio quita en cualquier posición de la tabla (quienes pasan
+    #    todos los demás ⊂ quienes pasan los anteriores) y ≤ «falla solo».
+    assert marg.loc[coh, "n_final"] == ga["n"].iloc[-1]
+    for c, col in COL.items():
+        m = marg.loc[coh, "sin_" + col] - marg.loc[coh, "n_final"]
+        assert 0 <= m <= min(pa[c], pb[c]) and m <= aislado.loc[coh, col], (coh, c, m)
+    # 7. El criterio que va ÚLTIMO muestra exactamente su costo marginal (en los dos órdenes).
+    for g, p_ in ((ga, pa), (gb, pb)):
+        ult = g["criterio"].iloc[-1]
+        assert p_[ult] == marg.loc[coh, "sin_" + COL[ult]] - marg.loc[coh, "n_final"], (coh, ult)
 assert indice.to_dict() == {1701: 1233, 1702: 934}, indice.to_dict()  # lab 17, decisión 9
 
 # --- Markdown ---------------------------------------------------------------
@@ -59,12 +71,16 @@ for coh in (1701, 1702):
                    f"{marca}{gb.criterio[i]}{marca} | {gb.n[i]:,} | {marca}{f(gb.perdidos[i])}{marca} |")
     pa = ga.set_index("criterio"); pb = gb.set_index("criterio")
     sal += ["", f"**Pérdida de cada criterio según el orden ({NOMBRE[coh]})**\n",
-            "| criterio | falla solo (de las "f"{int(aislado.loc[coh, 'inicial']):,}) | pérdida en orden A | pérdida en orden B |",
-            "|---|---:|---:|---:|"]
+            "| criterio | falla solo (de las "f"{int(aislado.loc[coh, 'inicial']):,}) | pérdida en orden A | pérdida en orden B | costo marginal |",
+            "|---|---:|---:|---:|---:|"]
     for c, col in COL.items():
         sal.append(f"| {c.lstrip('+− ').strip()} | {int(aislado.loc[coh, col]):,} | "
-                   f"{int(pa.perdidos[c]):,} | {int(pb.perdidos[c]):,} |")
-    sal += [f"| **N final** | | **{int(ga.n.iloc[-1]):,}** | **{int(gb.n.iloc[-1]):,}** |", ""]
+                   f"{int(pa.perdidos[c]):,} | {int(pb.perdidos[c]):,} | "
+                   f"+{int(marg.loc[coh, 'sin_' + col] - marg.loc[coh, 'n_final']):,} |")
+    sal += [f"| **N final** | | **{int(ga.n.iloc[-1]):,}** | **{int(gb.n.iloc[-1]):,}** | |",
+            "", "*Costo marginal = personas que se sumarían a la cohorte final si ese criterio (y solo ese) "
+            "se quitara de la definición (N sin el criterio − N final). No depende del orden "
+            "(`consulta_marginal.sql`).*", ""]
 sal += ["## Lo que no es reordenar: el índice\n",
         "Filtrar por fecha **antes** de tomar la primera receta cambia cuál es el índice. Personas con alguna "
         f"receta desde 2017-01-01: **{indice[1701]:,}** (1701) y **{indice[1702]:,}** (1702), contra 346 y 238 "

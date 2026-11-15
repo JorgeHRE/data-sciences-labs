@@ -19,18 +19,20 @@ Generada por `tabla_orden.py` (no editar a mano). Orden A = el del lab 17 (`orde
 
 **Pérdida de cada criterio según el orden (Lisinopril (1701))**
 
-| criterio | falla solo (de las 1,522) | pérdida en orden A | pérdida en orden B |
-|---|---:|---:|---:|
-| índice desde 2017-01-01 | 1,176 | 1,176 | 1,176 |
-| 365 d de observación previa | 0 | 0 | 0 |
-| lavado de 365 d | 0 | 0 | 0 |
-| edad ≥ 18 | 0 | 0 | 0 |
-| hipertensión (−∞, 0] | 75 | 26 | 26 |
-| ≥ 2 visitas en [−365, −1] | 1,035 | 147 | 133 |
-| demencia previa | 18 | 1 | 2 |
-| otro fármaco previo | 576 | 50 | 63 |
-| combinación en el índice | 14 | 0 | 0 |
-| **N final** | | **122** | **122** |
+| criterio | falla solo (de las 1,522) | pérdida en orden A | pérdida en orden B | costo marginal |
+|---|---:|---:|---:|---:|
+| índice desde 2017-01-01 | 1,176 | 1,176 | 1,176 | +120 |
+| 365 d de observación previa | 0 | 0 | 0 | +0 |
+| lavado de 365 d | 0 | 0 | 0 | +0 |
+| edad ≥ 18 | 0 | 0 | 0 | +0 |
+| hipertensión (−∞, 0] | 75 | 26 | 26 | +22 |
+| ≥ 2 visitas en [−365, −1] | 1,035 | 147 | 133 | +133 |
+| demencia previa | 18 | 1 | 2 | +1 |
+| otro fármaco previo | 576 | 50 | 63 | +49 |
+| combinación en el índice | 14 | 0 | 0 | +0 |
+| **N final** | | **122** | **122** | |
+
+*Costo marginal = personas que se sumarían a la cohorte final si ese criterio (y solo ese) se quitara de la definición (N sin el criterio − N final). No depende del orden (`consulta_marginal.sql`).*
 
 ## Amlodipino (1702)
 
@@ -49,18 +51,20 @@ Generada por `tabla_orden.py` (no editar a mano). Orden A = el del lab 17 (`orde
 
 **Pérdida de cada criterio según el orden (Amlodipino (1702))**
 
-| criterio | falla solo (de las 1,104) | pérdida en orden A | pérdida en orden B |
-|---|---:|---:|---:|
-| índice desde 2017-01-01 | 866 | 866 | 866 |
-| 365 d de observación previa | 0 | 0 | 0 |
-| lavado de 365 d | 0 | 0 | 0 |
-| edad ≥ 18 | 0 | 0 | 0 |
-| hipertensión (−∞, 0] | 2 | 1 | 1 |
-| ≥ 2 visitas en [−365, −1] | 763 | 72 | 54 |
-| demencia previa | 13 | 1 | 0 |
-| otro fármaco previo | 628 | 83 | 102 |
-| combinación en el índice | 3 | 0 | 0 |
-| **N final** | | **81** | **81** |
+| criterio | falla solo (de las 1,104) | pérdida en orden A | pérdida en orden B | costo marginal |
+|---|---:|---:|---:|---:|
+| índice desde 2017-01-01 | 866 | 866 | 866 | +50 |
+| 365 d de observación previa | 0 | 0 | 0 | +0 |
+| lavado de 365 d | 0 | 0 | 0 | +0 |
+| edad ≥ 18 | 0 | 0 | 0 | +0 |
+| hipertensión (−∞, 0] | 2 | 1 | 1 | +0 |
+| ≥ 2 visitas en [−365, −1] | 763 | 72 | 54 | +54 |
+| demencia previa | 13 | 1 | 0 | +0 |
+| otro fármaco previo | 628 | 83 | 102 | +82 |
+| combinación en el índice | 3 | 0 | 0 | +0 |
+| **N final** | | **81** | **81** | |
+
+*Costo marginal = personas que se sumarían a la cohorte final si ese criterio (y solo ese) se quitara de la definición (N sin el criterio − N final). No depende del orden (`consulta_marginal.sql`).*
 
 ## Lo que no es reordenar: el índice
 

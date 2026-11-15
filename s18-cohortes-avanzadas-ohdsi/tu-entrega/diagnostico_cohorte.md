@@ -102,19 +102,19 @@ Las banderas se validaron contra `results.cohort` del lab 17 comparando **person
 
 ### Qué criterio costó más y si ese precio vale la pena
 
-**El que más costó fue el inicio de estudio** (77.3 % y 78.4 % de las primeras recetas), pero no es un criterio clínico: es una decisión sobre los datos. Antes de 2016 la base «observa» casi sin registros y las primeras recetas se acumulan en 2015-2016 (665 de las 1,522 en 2016 contra 36 en 2017), así que muchos «nuevos usuarios» de entonces ya tomaban el fármaco (lab 17, decisión 9). Sin ese corte la cohorte dejaría de ser de nuevos usuarios, así que el precio vale la pena para esta pregunta. Tiene un costo que aquí se ve: con índice desde 2017 el seguimiento máximo posible es de unos 9.8 años, y para un desenlace de aparición lenta como la demencia eso limita lo que la base puede mostrar (sección 1).
+**En la tabla, el que más cuesta es el inicio de estudio** (77.3 % y 78.4 % de las primeras recetas), pero esa cifra es en gran parte un efecto de ir primero: su **costo marginal** (cuántas personas más tendría la cohorte final sin ese criterio) es de solo 120 en 1701 y 50 en 1702 (sección 3), porque casi todos los anteriores a 2017 habrían salido igual por otro criterio. Tampoco es un criterio clínico: es una decisión sobre los datos. Antes de 2016 la base «observa» casi sin registros y las primeras recetas se acumulan en 2015-2016 (665 de las 1,522 en 2016 contra 36 en 2017), así que muchos «nuevos usuarios» de entonces ya tomaban el fármaco (lab 17, decisión 9). Sin ese corte la cohorte dejaría de ser de nuevos usuarios, así que el precio vale la pena para esta pregunta. Tiene un costo que aquí se ve: con índice desde 2017 el seguimiento máximo posible es de unos 9.8 años, y para un desenlace de aparición lenta como la demencia eso limita lo que la base puede mostrar (sección 1).
 
-**Entre los criterios clínicos el más caro fue «≥ 2 visitas en el año previo»** en lisinopril (147 de 320, el 45.9 %), y «otro fármaco previo» en amlodipino (83 de 164, el 50.6 %). El de las visitas es el más discutible: su propósito es asegurar que se observaba a la persona (una sola visita puede ser la del propio diagnóstico), pero es un sustituto de la observación real y cuesta casi la mitad de quienes llegaban. Con N = 1 el lab 17 midió que habría quitado 80 en vez de 147 (decisión 11 de ese lab); con N = 3, 207. La exclusión del otro fármaco sí tiene una razón de diseño fuerte (quien inicia los dos no es nuevo usuario de uno solo), así que su costo, aunque alto, es el precio del diseño.
+**Entre los criterios clínicos el más caro en la tabla fue «≥ 2 visitas en el año previo»** en lisinopril (147 de 320, el 45.9 %), y «otro fármaco previo» en amlodipino (83 de 164, el 50.6 %). Por costo marginal el orden es el mismo: las visitas (+133) en 1701 y «otro fármaco» (+82) en 1702. El de las visitas es el más discutible: su propósito es asegurar que se observaba a la persona (una sola visita puede ser la del propio diagnóstico), pero es un sustituto de la observación real y cuesta casi la mitad de quienes llegaban. Con N = 1 el lab 17 midió que habría quitado 80 en vez de 147 (decisión 11 de ese lab); con N = 3, 207. La exclusión del otro fármaco sí tiene una razón de diseño fuerte (quien inicia los dos no es nuevo usuario de uno solo), así que su costo, aunque alto, es el precio del diseño.
 
 **Tres criterios no quitaron a nadie** (observación previa, lavado y edad ≥ 18), ni siquiera en las 1,522 personas con primera receta: la observación previa de 365 días no filtra porque `observation_period` abarca toda la historia (lab 17, control 0a), y el lavado no quita a nadie por construcción porque el índice es la primera receta de toda la historia. Son criterios correctos de la definición que, en esta base, no cambian el resultado.
 
-**Advertencia sobre estas lecturas:** el costo de cada criterio depende del orden en que se aplicó. Que el inicio de estudio sea el más caro es en parte porque va primero; la actividad 3 lo comprueba reordenando.
+**Advertencia sobre estas lecturas:** el costo de cada criterio en la tabla depende del orden en que se aplicó. La sección 3 lo comprueba reordenando y mide el costo marginal, que no depende del orden: el inicio de estudio, que parece costar 1,176 personas, solo cuesta 120.
 
 ---
 
 ## 3. El orden importa
 
-Código: [`orden_b.sql`](orden_b.sql), [`consulta_aislado.sql`](consulta_aislado.sql), [`contraejemplo_indice.sql`](contraejemplo_indice.sql) y [`tabla_orden.py`](tabla_orden.py), que genera [`atricion_ordenes.md`](atricion_ordenes.md) (con 1702 completo) y comprueba lo que se afirma aquí.
+Código: [`orden_b.sql`](orden_b.sql), [`consulta_aislado.sql`](consulta_aislado.sql), [`consulta_marginal.sql`](consulta_marginal.sql), [`contraejemplo_indice.sql`](contraejemplo_indice.sql) y [`tabla_orden.py`](tabla_orden.py), que genera [`atricion_ordenes.md`](atricion_ordenes.md) (con 1702 completo) y comprueba lo que se afirma aquí.
 
 ### Qué se reordenó
 
@@ -141,20 +141,30 @@ Dos criterios clínicos: **«≥ 2 visitas en [−365, −1]»** y **«sin otro 
 
 ### Lo que sí cambia: el «costo» de cada criterio
 
-| criterio (1701) | falla solo, de las 1,522 | pérdida en orden A | pérdida en orden B |
-|---|---:|---:|---:|
-| índice desde 2017-01-01 | 1,176 | 1,176 | 1,176 |
-| hipertensión (−∞, 0] | 75 | 26 | 26 |
-| **≥ 2 visitas en [−365, −1]** | 1,035 | **147** | **133** |
-| demencia previa | 18 | 1 | 2 |
-| **otro fármaco previo** | 576 | **50** | **63** |
-| combinación en el índice | 14 | 0 | 0 |
+| criterio (1701) | falla solo, de las 1,522 | pérdida en orden A | pérdida en orden B | costo marginal |
+|---|---:|---:|---:|---:|
+| índice desde 2017-01-01 | 1,176 | 1,176 | 1,176 | +120 |
+| hipertensión (−∞, 0] | 75 | 26 | 26 | +22 |
+| **≥ 2 visitas en [−365, −1]** | 1,035 | **147** | **133** | +133 |
+| demencia previa | 18 | 1 | 2 | +1 |
+| **otro fármaco previo** | 576 | **50** | **63** | +49 |
+| combinación en el índice | 14 | 0 | 0 | +0 |
+
+*Observación previa, lavado y edad (0 en todas las columnas) no se muestran. **Costo marginal** = personas que se sumarían a la cohorte final (122) si ese criterio, y solo ese, se quitara de la definición. No depende del orden. La tabla completa y 1702 están en [`atricion_ordenes.md`](atricion_ordenes.md).*
 
 - Los dos criterios intercambiados cambian: «otro fármaco» pasa de costar 50 a 63 al ir antes, y las visitas de 147 a 133 al ir después. En amlodipino el efecto es mayor: «otro fármaco» pasa de 83 a 102 y las visitas de 72 a 54.
 - **También cambia un criterio que no se movió:** «demencia previa» pasa de −1 a −2 (en amlodipino, de −1 a 0). Se explica por el único paso distinto antes de ella, el 6: en el orden A ahí van las visitas, y una persona con demencia previa y pocas visitas salía ya en ese paso; en el B ahí va «otro fármaco», y esa persona sigue hasta que la quita la demencia. En amlodipino ocurre lo contrario: la persona con demencia previa ya había salido por «otro fármaco», que ahora va antes. Esto es lo que impide hablar de un costo «propio» de cada criterio.
 - La columna «falla solo» es el otro extremo: sin importar el orden, las visitas dejarían fuera a **1,035** de las 1,522 personas. En secuencia solo cuestan 147 o 133 porque la mayoría ya salió por el inicio de estudio (muchas de las primeras recetas son anteriores a 2017, cuando casi no hay visitas registradas). El costo en una tabla de atrición **no es una propiedad del criterio**: es la parte de su efecto que los pasos anteriores no habían ya producido.
 
-**Por eso el orden se declara**: «las visitas costaron 147 personas» sin decir en qué paso se aplicaron no se puede reproducir ni comparar. Para comparar criterios sin que el orden decida, hay que mirar la columna «falla solo» o reportar varios órdenes.
+### El costo marginal: la medida que no depende del orden
+
+Las tres columnas responden preguntas distintas. «Falla solo» dice cuánta gente incumple el criterio (1,035 para las visitas). La pérdida en la tabla dice cuánta quita **después de los pasos anteriores** (147 o 133, según la ruta). El **costo marginal** dice cuánta gente ganaría la cohorte final si se quitara ese criterio y se dejaran los demás: **+133** en las visitas. Es lo que contesta «¿cuánto cuesta realmente este criterio?», y se puede reproducir sin saber en qué orden se aplicó.
+
+- **La relación entre las tres:** el costo marginal es siempre menor o igual que lo que el criterio quita en la tabla, en cualquier posición, y es igual cuando va **último**. Por eso las visitas muestran exactamente +133 en el orden B (donde van al final, salvo «combinación», que quita 0) y «otro fármaco» muestra 50 contra +49 (la diferencia de 1 es una persona que falla «otro fármaco» y «combinación» a la vez). El script comprueba estas dos propiedades.
+- **El inicio de estudio es el caso extremo:** parece costar 1,176 personas (77 %), pero quitarlo solo recuperaría **120** (la cohorte pasaría de 122 a 242, la cohorte 1711 del lab 17). Los otros 1,056 que salen en ese paso habrían salido igual por visitas, otro fármaco u otro criterio. Su costo en la tabla es casi todo solapamiento por ir primero.
+- **En 1702 el ranking es otro:** el mayor costo marginal es «otro fármaco» (+82), seguido de las visitas (+54) y el inicio de estudio (+50).
+
+**Por eso el orden se declara**: «las visitas costaron 147 personas» sin decir en qué paso se aplicaron no se puede reproducir ni comparar. Para hablar del costo de un criterio, lo que se reporta es el **costo marginal** (y el orden de la tabla, si se muestra).
 
 ### Lo que no es reordenar: el índice
 
