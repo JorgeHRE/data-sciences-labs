@@ -295,6 +295,34 @@ obs_previa AS (
       ON op.person_id = e.person_id
      AND op.observation_period_start_date <= e.fecha_indice - 365
      AND op.observation_period_end_date   >= e.fecha_indice
+),
+-- Actividad 4. lavado: CERO exposición al fármaco en los 365 días previos
+-- al índice, ventana [−365, −1] (decisión 10). Es un filtro distinto de
+-- obs_previa: aquel dice «te estábamos viendo», este dice «y no lo tenías».
+-- NOT EXISTS (anti-semi-join): deja pasar a quien no tiene NINGUNA receta
+-- que cumpla; no trae columnas ni puede multiplicar filas.
+-- «Exposición en la ventana» = receta que empezó ANTES del índice
+-- (inicio < índice: el día 0 es el propio índice, no cuenta) y que NO
+-- terminó antes de la ventana (fin ≥ índice − 365). Mirar solo la fecha de
+-- inicio sería un error: una receta que empezó hace 2 años y dura 3 sigue
+-- activa en la ventana (medido: 779 / 609 usuarios previos se colarían).
+-- greatest(fin, inicio): 83 / 64 recetas tienen fin < inicio (act. 2b);
+-- así su duración nunca es negativa.
+-- Con índice = primera receta de TODA la historia (act. 2b) no existe
+-- ninguna receta anterior: el filtro quita 0 por construcción. Se deja
+-- explícito para que la definición lo diga, y porque protege si algún día
+-- se relaja el evento inicial (control 4a, fuera del bloque).
+lavado AS (
+    SELECT o.*
+    FROM obs_previa o
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM recetas r
+        WHERE r.cohort_definition_id = o.cohort_definition_id
+          AND r.person_id = o.person_id
+          AND r.inicio < o.fecha_indice
+          AND greatest(r.fin, r.inicio) >= o.fecha_indice - 365
+    )
 )
 -- Resultado (2026-11-15), 16 filas (4 pasos × 4 cohortes), < 1 s;
 -- filas = distintos en todas:
@@ -312,6 +340,10 @@ obs_previa AS (
 -- solo 2 personas con menos de 2 años. Es el periodo de décadas de los
 -- controles 0a-0c: el filtro se cumple siempre, sin probar observación
 -- real (antes de 2016 solo ~1 de cada 4 «observados» tiene visitas).
+-- Actividad 4: el lavado quita 0 por construcción (índice = 1.ª receta de la
+-- historia: no hay recetas anteriores). El control 4a (fuera del bloque)
+-- prueba que el criterio no es vacío: aplicado a un índice más flojo quita
+-- 777 / 609 de 1,125 / 847 (decisión 10).
 -- 42,085 ≠ 42,002 de results.lisinopril_exposicion (lab 13): la diferencia
 -- son las 83 recetas con fin < inicio (days_supply negativo, mínimo −6),
 -- que el lab 13 excluyó. Aquí se conservan porque su fecha de INICIO es
@@ -339,6 +371,10 @@ UNION ALL
 SELECT '3 + 365 días de observación', cohort_definition_id,
        count(*), count(DISTINCT person_id)
 FROM obs_previa GROUP BY cohort_definition_id
+UNION ALL
+SELECT '4 + lavado 365 días', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM lavado GROUP BY cohort_definition_id
 ORDER BY paso, cohort_definition_id;
 -- [FIN cohorte] ========================================================
 
@@ -404,3 +440,58 @@ FROM del_dia dd
 JOIN cdm.concept c ON c.concept_id = dd.un_producto
 GROUP BY 1, 2
 ORDER BY 1, 3 DESC;
+
+-- Control 4a. ¿El lavado hace algo, o es un filtro vacío?
+-- Con índice = 1.ª receta de la historia quita 0 por construcción, así que
+-- no se puede saber si el criterio está bien escrito. Prueba: aplicarlo a un
+-- índice MÁS FLOJO, cualquier receta desde 2017 (cada receta es un
+-- candidato), donde SÍ debe quitar gente. Es un diagnóstico, no la cohorte.
+-- Funciones de ventana en vez de NOT EXISTS por candidato: la versión
+-- correlacionada (una subconsulta por cada una de las ~40,000 recetas)
+-- pasó de 2 minutos; esta corre en segundos. Ventana: las recetas de la
+-- misma persona ordenadas por inicio; RANGE con intervalos mira por FECHA
+-- (no por posición), así que las recetas del mismo día no se cuentan
+-- entre sí (la ventana termina 1 día antes: «inicio < índice»).
+--   n_inicio_vent : recetas con INICIO en [−365, −1]
+--   max_fin_prev  : fin más tardío de todas las recetas anteriores
+-- Tres cuentas de personas por cohorte (con ≥ 1 candidato que pasa):
+--   solo_inicio : lavado mirando solo fechas de inicio (n_inicio_vent = 0)
+--   activa      : lavado de la cohorte (max_fin_prev < índice − 365 o NULL)
+--   historia    : cohorte real (candidato = 1.ª receta de toda la historia)
+-- Resultado (2026-11-15): 1701 → 1,125 / 348 / 346; 1702 → 847 / 238 / 238.
+--   El lavado por inicio deja 779 / 609 usuarios previos cuya receta
+--   anterior sigue vigente (duran años). El de exposición activa los quita
+--   casi todos y difiere de la cohorte real en 2 personas (1701): reinician
+--   tras más de 365 días sin fármaco; no son «nuevas» (decisión 10).
+WITH recetas AS (
+    SELECT p.cohort_definition_id AS c, d.person_id,
+           d.drug_exposure_start_date AS inicio,
+           greatest(d.drug_exposure_end_date,
+                    d.drug_exposure_start_date) AS fin   -- fin < inicio: 83/64
+    FROM results.cohorte_parametros p
+    JOIN cdm.concept_ancestor ca ON ca.ancestor_concept_id = p.ingrediente_exp
+    JOIN cdm.drug_exposure d     ON d.drug_concept_id = ca.descendant_concept_id
+    WHERE d.drug_type_concept_id = 32838
+      AND p.cohort_definition_id IN (1701, 1702)
+),
+con_pasado AS (
+    SELECT c, person_id, inicio,
+           count(*) OVER w365 AS n_inicio_vent,
+           max(fin) OVER wprev AS max_fin_prev,
+           min(inicio) OVER (PARTITION BY c, person_id) AS primera
+    FROM recetas
+    WINDOW w365  AS (PARTITION BY c, person_id ORDER BY inicio
+                     RANGE BETWEEN INTERVAL '365 days' PRECEDING
+                               AND INTERVAL '1 day' PRECEDING),
+           wprev AS (PARTITION BY c, person_id ORDER BY inicio
+                     RANGE BETWEEN UNBOUNDED PRECEDING
+                               AND INTERVAL '1 day' PRECEDING)
+)
+SELECT c AS cohorte,
+       count(DISTINCT person_id) FILTER (WHERE n_inicio_vent = 0)  AS solo_inicio,
+       count(DISTINCT person_id) FILTER (WHERE max_fin_prev IS NULL
+                                    OR max_fin_prev < inicio - 365) AS activa,
+       count(DISTINCT person_id) FILTER (WHERE inicio = primera)   AS historia
+FROM con_pasado
+WHERE inicio >= DATE '2017-01-01'
+GROUP BY c ORDER BY c;
