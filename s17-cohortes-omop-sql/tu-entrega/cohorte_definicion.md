@@ -35,7 +35,7 @@ La primera receta del fármaco en toda la historia de la persona (cualquier prod
 Antes de los criterios clínicos se aplican tres filtros, que se reportan por separado:
 - **Periodo de estudio:** la fecha índice (la primera receta de toda la historia) es el 2017-01-01 o posterior. Se aplica después de buscar la primera receta, no antes: quien empezó en 2015 y tiene otra receta en 2018 no es nuevo usuario en 2018.
 - **Observación previa:** el periodo de observación contiene la fecha índice y empieza al menos 365 días antes.
-- **Lavado:** ninguna receta del fármaco en [−365, −1].
+- **Lavado:** ninguna exposición al fármaco en [−365, −1]: ninguna receta que empezara antes del índice y siguiera activa (fin ≥ índice − 365) dentro de la ventana. Mirar solo la fecha de inicio dejaría pasar a quien tiene una receta antigua que dura años. Como el índice es la primera receta de toda la historia, este filtro quita 0 por construcción; se escribe igual para que la definición lo diga (decisión 10).
 
 Criterios de inclusión, cada uno con su ventana:
 - **Edad ≥ 18 años en la fecha índice.** El estudio es sobre adultos. Se comprueba aunque se espera que no quite a nadie (0 menores entre los nuevos usuarios de lisinopril).
