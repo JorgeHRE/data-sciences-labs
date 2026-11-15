@@ -140,3 +140,184 @@ SELECT o.anio, o.personas_observadas,
 FROM observadas o
 LEFT JOIN con_visita v ON v.anio = o.anio   -- LEFT: un año sin visitas sale con 0
 ORDER BY o.anio;
+
+-- =====================================================================
+-- Actividad 2. Evento inicial: primera receta del fármaco, una fila por persona.
+-- =====================================================================
+
+-- Actividad 2a. Tabla de parámetros: una fila por cohorte (decisión 6).
+-- Por qué una tabla: la lógica de la cohorte es la misma para lisinopril y
+-- amlodipino; solo cambian los fármacos. Con los fármacos en una tabla, el
+-- mismo SQL construye las dos cohortes a la vez (cada CTE lleva
+-- cohort_definition_id) y una tercera cohorte sería una fila nueva, no un
+-- archivo nuevo (bono 1 del enunciado).
+--   ingrediente_exp  = ingrediente que define la fecha índice.
+--   ingrediente_otro = el otro fármaco del par; se usa en la exclusión de la
+--                      actividad 5 (uso en (−∞, 0], incluido el mismo día).
+-- Se guarda el INGREDIENTE (clase Ingredient de RxNorm), no los productos:
+-- los productos se obtienen con concept_ancestor, como en los labs 13-15.
+-- Re-ejecutable: CREATE ... IF NOT EXISTS + INSERT ... ON CONFLICT DO UPDATE
+-- (si la fila existe, se sobrescribe con estos valores; nunca se duplica,
+-- porque cohort_definition_id es la clave primaria).
+CREATE TABLE IF NOT EXISTS results.cohorte_parametros (
+    cohort_definition_id integer PRIMARY KEY,
+    nombre               text    NOT NULL,
+    ingrediente_exp      integer NOT NULL,
+    ingrediente_otro     integer NOT NULL
+);
+
+INSERT INTO results.cohorte_parametros VALUES
+    (1701, 'nuevos usuarios de lisinopril', 1308216, 1332418),
+    (1702, 'nuevos usuarios de amlodipino', 1332418, 1308216)
+ON CONFLICT (cohort_definition_id) DO UPDATE
+    SET nombre           = EXCLUDED.nombre,
+        ingrediente_exp  = EXCLUDED.ingrediente_exp,
+        ingrediente_otro = EXCLUDED.ingrediente_otro;
+
+-- Control 2a. Los parámetros apuntan a lo que creemos: ingredientes RxNorm
+-- estándar y vigentes. Un id mal tecleado no daría error: daría una cohorte
+-- vacía o de otro fármaco. Por eso se muestra el nombre desde concept.
+-- Los dos JOIN a concept son por clave primaria (concept_id): 1 fila por
+-- parámetro, no multiplican (2 filas antes, 2 después).
+-- Resultado (2026-11-15), 2 filas:
+--   1701 lisinopril → exp lisinopril, otro amlodipine
+--   1702 amlodipino → exp amlodipine, otro lisinopril
+--   los dos: clase Ingredient, standard_concept 'S', invalid_reason NULL.
+-- Segunda corrida: «relation already exists, skipping» + INSERT 0 2 y la
+-- tabla sigue con 2 filas → re-ejecutable.
+SELECT p.cohort_definition_id, p.nombre,
+       ce.concept_name AS exp,  ce.concept_class_id AS clase_exp,
+       ce.standard_concept AS std_exp, ce.invalid_reason AS inv_exp,
+       co.concept_name AS otro, co.concept_class_id AS clase_otro
+FROM results.cohorte_parametros p
+JOIN cdm.concept ce ON ce.concept_id = p.ingrediente_exp
+JOIN cdm.concept co ON co.concept_id = p.ingrediente_otro
+ORDER BY p.cohort_definition_id;
+
+-- [INICIO cohorte] =====================================================
+-- Construcción de la cohorte (actividades 2-7): UNA sentencia WITH que
+-- crece; cada actividad añade un CTE a la cadena (decisión 7).
+-- El SELECT final cuenta cada paso, una fila por paso y cohorte: es la
+-- tabla de atrición que se va formando (actividad 8).
+-- Para correr solo este bloque (los marcadores van anclados con ^ para
+-- que esta línea de comentario no los active):
+--   sed -n '/^-- \[INICIO cohorte\]/,/^-- \[FIN cohorte\]/p' \
+--     cohorte_definicion.sql | docker exec -i lab12-omop-db-1 psql ...
+-- Orden de los CTE: cada uno lee SOLO del anterior, así una persona que
+-- sale en un paso no puede volver a entrar en otro.
+-- =====================================================================
+WITH
+-- Actividad 2b. recetas: todas las recetas del fármaco de cada cohorte.
+-- concept_ancestor expande el ingrediente a todos sus productos (tabletas,
+-- combinaciones). Cada producto aparece UNA vez por ingrediente en
+-- concept_ancestor, así que el JOIN no duplica recetas: se comprueba en el
+-- SELECT final (filas = drug_exposure_id distintos).
+-- drug_type_concept_id = 32838 (EHR prescription): solo recetas; las
+-- vacunas (32827) quedan fuera, igual que en el lab 13.
+recetas AS (
+    SELECT p.cohort_definition_id,
+           d.drug_exposure_id,
+           d.person_id,
+           d.drug_concept_id,
+           d.drug_exposure_start_date AS inicio,
+           d.drug_exposure_end_date   AS fin
+    FROM results.cohorte_parametros p
+    JOIN cdm.concept_ancestor ca ON ca.ancestor_concept_id = p.ingrediente_exp
+    JOIN cdm.drug_exposure d     ON d.drug_concept_id = ca.descendant_concept_id
+    WHERE d.drug_type_concept_id = 32838
+),
+-- Actividad 2b. evento_inicial: la PRIMERA receta de toda la historia.
+-- GROUP BY cohorte y persona + min(inicio) → una fila por persona y
+-- cohorte. Orden lógico: FROM recetas → GROUP BY → SELECT min().
+-- Una misma persona puede estar en las dos cohortes (usa los dos
+-- fármacos); la exclusión del «otro» fármaco llega en la actividad 5.
+evento_inicial AS (
+    SELECT cohort_definition_id,
+           person_id,
+           min(inicio) AS fecha_indice
+    FROM recetas
+    GROUP BY cohort_definition_id, person_id
+)
+-- Resultado (2026-11-15), 4 filas, < 1 s; filas = distintos en todas:
+--   paso                    1701 lisinopril   1702 amlodipino
+--   0 recetas del fármaco        42,085            34,475
+--   1 evento inicial              1,522             1,104
+-- 42,085 ≠ 42,002 de results.lisinopril_exposicion (lab 13): la diferencia
+-- son las 83 recetas con fin < inicio (days_supply negativo, mínimo −6),
+-- que el lab 13 excluyó. Aquí se conservan porque su fecha de INICIO es
+-- válida: comprobado que excluirlas no cambia la fecha índice de nadie
+-- (0 en las dos cohortes). Amlodipino tiene 64 (36 personas). Pendiente
+-- para la actividad 6, donde sí importa la duración. Sin fin NULL; fin =
+-- inicio en 1,772 y 1,201 recetas («en curso» del ETL, lab 13).
+-- Conteo de cada paso. «filas» y «distintos» deben coincidir:
+--   recetas:        distintos = drug_exposure_id distintos (JOIN sin duplicar)
+--   evento_inicial: distintos = person_id distintos (trampa del enunciado)
+SELECT '0 recetas del fármaco' AS paso, cohort_definition_id,
+       count(*) AS filas, count(DISTINCT drug_exposure_id) AS distintos
+FROM recetas GROUP BY cohort_definition_id
+UNION ALL
+SELECT '1 evento inicial', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM evento_inicial GROUP BY cohort_definition_id
+ORDER BY paso, cohort_definition_id;
+-- [FIN cohorte] ========================================================
+
+-- Control 2c. ¿Con qué producto entra cada persona, y hay empates el día índice?
+-- Qué mide: las recetas del fármaco con inicio = fecha índice. Si una persona
+-- tiene 2 ese día, el min() del evento inicial ya dio una sola fila (no hay
+-- duplicado), pero «el producto del índice» sería ambiguo.
+-- Va FUERA del bloque de construcción: es un diagnóstico, no un componente.
+-- Repite a propósito la expansión del concept set (no puede leer los CTE de
+-- otra sentencia). El JOIN recetas ↔ índice es por (cohorte, persona,
+-- fecha): da una fila por receta del día índice, que es justo lo que se
+-- quiere contar aquí.
+-- Resultado (2026-11-15), 13 filas (9 productos de lisinopril, 4 de
+-- amlodipino); personas suman 1,522 y 1,104 → una fila por persona:
+--   1701: lisinopril 10 MG 1,415 · 20 MG 64 · 5 MG 15 · 40 MG 9 · 2.5 MG 3
+--         · 30 MG 2 · combinaciones con HIDROCLOROTIAZIDA 14 (10 + 2 + 2)
+--   1702: amlodipine 2.5 MG 1,101 · amlodipino/benazepril 2 · Tribenzor
+--         (amlodipino/HCTZ/olmesartán) 1
+--   Con 2 productos distintos el día índice: 0 en las dos cohortes → el
+--   producto del índice no es ambiguo.
+--   Con 2 recetas del MISMO producto ese día: 175 (1701) y 85 (1702). No
+--   son filas duplicadas: en toda la historia hay 187 / 89 pares así, y
+--   168 / 82 son una receta de 0 días (fin = inicio, «en curso» del ETL)
+--   junto a la receta con duración; solo 19 / 7 pares tienen el mismo fin.
+--   No afectan al índice (min() colapsa el día) ni a los tramos de la
+--   actividad 6 (se usa el fin máximo).
+-- Hallazgo para la actividad 5: 14 personas empiezan lisinopril con una
+-- combinación con HCTZ y 3 empiezan amlodipino con una combinación con otro
+-- antihipertensivo: inician DOS clases a la vez, como las 507 del inicio
+-- lisinopril + amlodipino. Decidir si se excluyen con el mismo criterio.
+WITH recetas AS (
+    SELECT p.cohort_definition_id, d.person_id, d.drug_concept_id,
+           d.drug_exposure_start_date AS inicio
+    FROM results.cohorte_parametros p
+    JOIN cdm.concept_ancestor ca ON ca.ancestor_concept_id = p.ingrediente_exp
+    JOIN cdm.drug_exposure d     ON d.drug_concept_id = ca.descendant_concept_id
+    WHERE d.drug_type_concept_id = 32838
+),
+indice AS (
+    SELECT cohort_definition_id, person_id, min(inicio) AS fecha_indice
+    FROM recetas GROUP BY 1, 2
+),
+del_dia AS (               -- recetas del día índice, por persona
+    SELECT r.cohort_definition_id, r.person_id,
+           count(*)                          AS recetas,
+           count(DISTINCT r.drug_concept_id) AS productos,
+           min(r.drug_concept_id)            AS un_producto
+    FROM recetas r
+    JOIN indice i ON i.cohort_definition_id = r.cohort_definition_id
+                 AND i.person_id = r.person_id
+                 AND r.inicio = i.fecha_indice
+    GROUP BY 1, 2
+)
+SELECT dd.cohort_definition_id,
+       c.concept_name                         AS producto_indice,
+       count(*)                               AS personas,
+       count(*) FILTER (WHERE dd.recetas > 1)   AS con_2_recetas_ese_dia,
+       count(*) FILTER (WHERE dd.productos > 1) AS con_2_productos_ese_dia
+FROM del_dia dd
+JOIN cdm.concept c ON c.concept_id = dd.un_producto
+GROUP BY 1, 2
+ORDER BY 1, 3 DESC;
