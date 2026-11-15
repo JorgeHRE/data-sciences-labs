@@ -614,8 +614,9 @@ salida_motivo AS (
 -- son las 83 recetas con fin < inicio (days_supply negativo, mínimo −6),
 -- que el lab 13 excluyó. Aquí se conservan porque su fecha de INICIO es
 -- válida: comprobado que excluirlas no cambia la fecha índice de nadie
--- (0 en las dos cohortes). Amlodipino tiene 64 (36 personas). Pendiente
--- para la actividad 6, donde sí importa la duración. Sin fin NULL; fin =
+-- (0 en las dos cohortes). Amlodipino tiene 64 (36 personas). En la
+-- salida (actividad 6) se conservan con greatest(fin, inicio), para que su
+-- duración nunca sea negativa. Sin fin NULL; fin =
 -- inicio en 1,772 y 1,201 recetas («en curso» del ETL, lab 13).
 -- [CONTEO] Los scripts de figuras cortan el bloque en esta línea y añaden
 -- su propio SELECT: así usan exactamente los mismos CTE.

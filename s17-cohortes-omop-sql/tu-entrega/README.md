@@ -16,7 +16,7 @@ Cohortes de **nuevos usuarios de lisinopril** (IECA) y de **amlodipino** (calcio
 | `insertar_cohorte.sql` / `insertar_cohorte.sh` | Plantilla del `INSERT` y script que la une con la cadena de CTE y la corre dentro de una transacción (actividad 7). |
 | `distribucion_salida.sql` | Duración del seguimiento por motivo de salida, con las validaciones (actividad 6). |
 | `caracterizacion.sql`, `tabla1.py`, `tabla1.md` | Consultas, script y salida de la tabla 1 (actividad 9). |
-| `figura_primeras_recetas.py` / `.png` | Primeras recetas por año antes y después de los filtros de entrada (actividad 3). |
+| `figura_primeras_recetas.py` / `.png` | Primeras recetas por año antes y después de los filtros de entrada (actividad 3); la figura se muestra en `cohorte_definicion.md`. |
 | `inmortal_time.sql` | Comprobaciones con datos de la actividad 10. |
 | `requirements.txt` | Dependencias de los dos scripts de Python. |
 | `README.md` | Este archivo. |
