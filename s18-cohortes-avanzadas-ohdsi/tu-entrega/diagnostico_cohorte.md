@@ -10,6 +10,7 @@ Contenido de este documento (se completa actividad por actividad):
 4. [Diagrama de flujo](#4-diagrama-de-flujo)
 5. [Incidencia por año y por edad](#5-incidencia-por-año-y-por-edad)
 6. [Qué códigos metieron a la gente](#6-qué-códigos-metieron-a-la-gente)
+7. [Conceptos huérfanos](#7-conceptos-huérfanos)
 
 ---
 
@@ -292,3 +293,34 @@ Código: [`codigos_indice.sql`](codigos_indice.sql) (cinco consultas) y [`tabla_
 - **No se puede estudiar la dosis.** Con 98.4 % de los usuarios en 10 mg (y todos los de amlodipino en 2.5 mg, la dosis más baja de las presentaciones habituales, lo cual sugiere que el ETL codifica una presentación única por fármaco), no hay variabilidad de dosis ni de presentación que describir ni usar como covariable.
 - **La definición depende de cómo codifica la base.** Con otra fuente, con marcas o con más dosis, el mismo concept set daría otra cohorte. Para esta base, «nuevo usuario de lisinopril» es en la práctica «nuevo usuario de lisinopril 10 mg en tabletas».
 - **La definición está bien; lo que hay que hacer es declararlo.** Como el concept set por ingrediente + descendientes es la forma estándar de especificar un fármaco, no hace falta cambiarlo: sí hace falta decir que casi no hay variabilidad en su contenido.
+
+---
+
+## 7. Conceptos huérfanos
+
+Código: [`huerfanos.sql`](huerfanos.sql) (seis consultas), [`huerfanos_pa.sql`](huerfanos_pa.sql) y [`huerfanos_preeclampsia.sql`](huerfanos_preeclampsia.sql) (impacto en la cohorte, se pegan después del bloque de banderas) y [`tabla_huerfanos.py`](tabla_huerfanos.py), que los ejecuta, comprueba las cifras y genera [`huerfanos.md`](huerfanos.md).
+
+Un huérfano es un código que aparece con frecuencia en la base, se parece a lo que buscabas y **no** está en tu concept set. Es el único diagnóstico que detecta lo que **falta**; los demás auditan lo que ya pusiste. Se buscó por tres vías: texto en `CONCEPT` (el método de la actividad, en dos niveles: el nombre mismo y términos cercanos), códigos fuente y registros sin mapear (lo que hace CohortDiagnostics además del texto), y otras tablas (mediciones).
+
+### Qué se encontró
+
+- **Por texto, ningún huérfano en el fármaco, el comparador, la hipertensión ni la demencia** en el nivel estricto, y ninguno en el ampliado de la demencia. Los concept sets por ingrediente más `concept_ancestor` ya cubren todo lo que dice «lisinopril», «amlodipine», «hypertens», «dementia» o «alzheimer» y tiene registros.
+- **Sin mapear y códigos fuente: 0.** No hay condiciones ni recetas sin mapear (concepto 0), ni valores fuente que mencionen lo buscado y estén fuera del set.
+- **El único huérfano real viene de otra tabla**: las mediciones de presión arterial (ver abajo). En el nivel ampliado de hipertensión aparecen además cuatro conceptos por texto, y hay un intruso dentro del set.
+
+### Decisión por cada candidato
+
+| candidato | qué es | personas | impacto en tu cohorte | decisión |
+|---|---|---:|---|---|
+| **Presión arterial elevada sin diagnóstico** (candidato real) | sistólica ≥ 140 o diastólica ≥ 90 en ≥ 2 fechas, sin diagnóstico de hipertensión | 915 en la base (44 % de quienes tienen presión elevada) | +3 de 122 (122 → 125); de 0 a 7 según el umbral | **No entra** (se reporta como limitación) |
+| «Pre-eclampsia» (439393), **intruso** dentro del set | trastorno hipertensivo del embarazo | 85 (62 solo por él) | 0 | **Se mantiene el set y se declara** |
+| «Eclampsia in pregnancy» (137613), huérfano | trastorno hipertensivo del embarazo, fuera del set | 120 | 0 | No entra |
+| Microalbuminuria / proteinuria por diabetes tipo 2 (45769905, 45757499) | complicación renal de la diabetes, coincide por «albuminuria/proteinuria» | 792 y 613 | no medido (no es hipertensión) | No entra (falso positivo del término ampliado) |
+| «Blood pressure within reference range» (4065875) | presión **normal** | 3 | no medido | No entra (falso positivo textual) |
+| Otros IECA (ramipril 14, enalapril 13, benazepril 9, quinapril 2) | otros fármacos de la clase | ≤ 14 | — | No son huérfanos: la pregunta es lisinopril, no la clase |
+
+**Presión arterial elevada sin diagnóstico: por qué no entra (decisión 15).** Es un candidato real: toda la base tiene mediciones de presión y 915 personas tienen presión elevada en al menos dos fechas sin ningún diagnóstico de hipertensión. Si se aceptara, de las 22 personas que fallan *solo* el criterio de hipertensión, 3 entrarían (122 → 125). No entra por cuatro razones: (1) la definición principal se declaró sin cambios en el paso 0, antes de ver los resultados, y cambiarla ahora es lo que esa declaración quería evitar; (2) el criterio de población del lab 17 es por **diagnóstico**, y uno basado en mediciones es otra definición, con su umbral y su número de fechas; (3) el resultado **depende de ese umbral**: con ≥ 2 fechas, 7 personas con 130/80, 3 con 140/90 y 0 con 160/100, de modo que el N de una definición con presión sería arbitrario; (4) una medición alta puntual no equivale a un diagnóstico (consulta, dolor, estrés). Queda como **limitación**: el 44 % de quienes tienen presión elevada no tiene diagnóstico de hipertensión, lo que sugiere que el diagnóstico puede estar subcodificado y que «hipertensión por diagnóstico» deja fuera a gente con la enfermedad.
+
+**Pre-eclampsia dentro del set (decisión 16).** El código 439393 es descendiente de «Hypertensive disorder» (316866), así que cuenta como hipertensión para el criterio, aunque es un trastorno del embarazo, transitorio y distinto de la hipertensión crónica. 62 personas de la base cumplirían el criterio solo por él, pero ninguna llega a tu cohorte (0 entre las primeras recetas y 0 en la final). Como el impacto es 0, se **mantiene el concept set del lab 17 sin cambios** y se declara; si el set se reutiliza en otra cohorte conviene excluir 439393. La misma lógica vale para «Eclampsia in pregnancy», que no está en el set: ninguna de las personas que fallan solo el criterio de hipertensión lo tiene. Que un trastorno hipertensivo del embarazo esté dentro del set y otro fuera muestra que el set no es coherente en ese punto, pero ninguno de los dos debería definir hipertensión crónica.
+
+**Lo que no se hizo:** no se comparó con la definición publicada en la OHDSI Phenotype Library (el recurso lo propone como referencia); queda pendiente. Tampoco se consideró cada concepto del vocabulario: la búsqueda es por texto, y un código sin parecido de nombre con lo buscado no aparecería.
