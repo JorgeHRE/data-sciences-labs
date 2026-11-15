@@ -1,0 +1,6 @@
+# Lab 18 — entorno para las figuras y tablas (consultas de solo lectura al Postgres del lab 12)
+pandas
+sqlalchemy
+psycopg2-binary
+matplotlib
+python-dotenv
