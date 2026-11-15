@@ -7,6 +7,7 @@ Contenido de este documento (se completa actividad por actividad):
 1. [Factibilidad a posteriori](#1-factibilidad-a-posteriori)
 2. [Tabla de atrición](#2-tabla-de-atrición)
 3. [El orden importa](#3-el-orden-importa)
+4. [Diagrama de flujo](#4-diagrama-de-flujo)
 
 ---
 
@@ -169,3 +170,20 @@ Las tres columnas responden preguntas distintas. «Falla solo» dice cuánta gen
 ### Lo que no es reordenar: el índice
 
 Hay un cambio que **sí** alteraría el N final y que no es un criterio más: filtrar por fecha **antes** de tomar la primera receta. Cambia cuál es el índice: 1,233 personas en 1701 y 934 en 1702 tendrían alguna receta desde 2017, contra 346 y 238 con la primera de toda la historia. La diferencia (887 y 696) son usuarios previos que pasarían por «nuevos». Por eso en la actividad 2 la primera receta es el paso 0 y no una bandera.
+
+---
+
+## 4. Diagrama de flujo
+
+Código: [`figura_consort.py`](figura_consort.py). Genera [`figura_consort_1701.png`](figura_consort_1701.png) (lisinopril) y [`figura_consort_1702.png`](figura_consort_1702.png) (amlodipino) a 300 dpi desde la misma tabla de atrición de la sección 2.
+
+![Diagrama de flujo de la cohorte de nuevos usuarios de lisinopril, de 1,522 primeras recetas a 122 personas](figura_consort_1701.png)
+
+**Pie de figura (para la tesis):** Diagrama de flujo de la cohorte de nuevos usuarios de lisinopril con hipertensión. Las cajas centrales muestran el N tras cada criterio, aplicados en el orden indicado; las cajas de la derecha, las personas excluidas en cada paso y el motivo. Los porcentajes bajo el N son respecto a las 1,522 primeras recetas; los de las exclusiones, respecto al paso anterior. Los criterios que no excluyeron a nadie (observación previa ≥ 365 días, lavado de 365 días, edad ≥ 18 y combinación en el índice) se indican aparte.
+
+**Decisiones de forma** (decisión 10):
+
+- **Los pasos sin pérdidas no son cajas.** Observación previa, lavado, edad y combinación en el índice quitan 0; dibujarlos como cajas repetiría el mismo N y ocuparía espacio. Van como una nota punteada junto a la flecha y, el último, en la caja final. Se declaran en la figura para que quien la lea sepa que se aplicaron.
+- **Cada caja nombra el criterio, no solo el número.** Una figura con «N = 320» sin decir qué paso la produjo no se entiende sin la tabla.
+- **El orden es el del lab 17**, y la figura lo dice al pie: el costo de cada criterio depende del orden (sección 3), y un diagrama de flujo siempre fija uno.
+- **Las cifras salen de la base, no se escriben a mano.** El script se detiene si cambian el N inicial o final, o si las pérdidas dibujadas no suman lo que se fue entre el inicio y el final (1,400 en 1701; 1,023 en 1702).
