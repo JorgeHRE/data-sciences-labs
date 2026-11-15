@@ -807,3 +807,71 @@ SELECT count(*) AS personas,
        count(*) FILTER (WHERE year_of_birth IS NULL) AS yob_nulo,
        min(year_of_birth) AS min_yob, max(year_of_birth) AS max_yob
 FROM cdm.person;
+
+-- =====================================================================
+-- Actividad 7. Verificación de results.cohort (después de ./insertar_cohorte.sh)
+-- Estas consultas leen la tabla ya escrita, no la cadena de CTE.
+-- =====================================================================
+
+-- Control 7a. Forma de la tabla: filas = personas distintas (una por persona
+-- y cohorte), ninguna con fin anterior al inicio.
+-- Resultado (2026-11-15), 4 filas:
+--   cohorte  filas  personas  fin_antes_inicio  inicio_min   fin_max     dur_min
+--   1701       122     122            0         2017-01-27  2026-10-16      1
+--   1702        81      81            0         2017-03-24  2026-10-26      7
+--   1711       242     242            0         1955-10-25  2026-10-26      1
+--   1712       131     131            0         1969-11-13  2026-10-26      7
+-- 1711/1712 empiezan en 1955/1969 porque no tienen inicio de estudio.
+SELECT cohort_definition_id AS cohorte, count(*) AS filas,
+       count(DISTINCT subject_id) AS personas,
+       count(*) FILTER (WHERE cohort_end_date < cohort_start_date) AS fin_antes_inicio,
+       min(cohort_start_date) AS inicio_min, max(cohort_start_date) AS inicio_max,
+       max(cohort_end_date) AS fin_max,
+       min(cohort_end_date - cohort_start_date) AS dur_min
+FROM results.cohort
+GROUP BY cohort_definition_id ORDER BY cohort_definition_id;
+
+-- Control 7b. Ninguna fecha fuera del periodo de observación.
+-- JOIN con observation_period: es seguro porque cada persona tiene UN
+-- periodo (control 0a). Se comprueba igual: filas_tras_join debe ser igual a
+-- filas_tabla (si fuera mayor, el JOIN duplicó; si menor, alguien no tiene
+-- periodo y habría desaparecido en silencio).
+-- Resultado (2026-11-15), 4 filas: filas_tras_join = filas_tabla (122, 81,
+-- 242, 131) y las cuatro columnas de fuera de rango = 0 (inicio antes del
+-- periodo, fin después del periodo, inicio después del fin del periodo,
+-- menos de 365 días de observación antes del inicio).
+SELECT c.cohort_definition_id AS cohorte, count(*) AS filas_tras_join,
+       (SELECT count(*) FROM results.cohort x
+         WHERE x.cohort_definition_id = c.cohort_definition_id) AS filas_tabla,
+       count(*) FILTER (WHERE c.cohort_start_date < op.observation_period_start_date) AS inicio_antes_op,
+       count(*) FILTER (WHERE c.cohort_end_date   > op.observation_period_end_date)   AS fin_despues_op,
+       count(*) FILTER (WHERE c.cohort_start_date > op.observation_period_end_date)   AS inicio_despues_op,
+       count(*) FILTER (WHERE c.cohort_start_date - 365 < op.observation_period_start_date) AS menos_365_obs
+FROM results.cohort c
+JOIN cdm.observation_period op ON op.person_id = c.subject_id
+GROUP BY c.cohort_definition_id ORDER BY c.cohort_definition_id;
+
+-- Control 7c. Contraste independiente del inicio: la fecha de inicio de la
+-- tabla debe ser la primera receta del fármaco calculada de nuevo desde
+-- drug_exposure (sin pasar por la cadena de CTE). LATERAL: una subconsulta
+-- por fila de la tabla; da una fila por persona, no multiplica.
+-- Resultado (2026-11-15): inicio_igual_primera_receta = filas en las cuatro
+-- cohortes (122, 81, 242, 131).
+SELECT c.cohort_definition_id AS cohorte, count(*) AS filas,
+       count(*) FILTER (WHERE c.cohort_start_date = pr.primera) AS inicio_igual_primera_receta
+FROM results.cohort c
+JOIN results.cohorte_parametros p USING (cohort_definition_id)
+JOIN LATERAL (
+    SELECT min(d.drug_exposure_start_date) AS primera
+    FROM cdm.concept_ancestor ca
+    JOIN cdm.drug_exposure d ON d.drug_concept_id = ca.descendant_concept_id
+    WHERE ca.ancestor_concept_id = p.ingrediente_exp
+      AND d.person_id = c.subject_id AND d.drug_type_concept_id = 32838) pr ON true
+GROUP BY c.cohort_definition_id ORDER BY c.cohort_definition_id;
+
+-- Control 7d (en la tabla, no en una consulta). Las restricciones de
+-- results.cohort rechazan filas malas: un INSERT con fin anterior al inicio
+-- da «violates check constraint cohort_check»; repetir una fila da
+-- «duplicate key value violates unique constraint cohort_pkey» (probado
+-- dentro de una transacción con ROLLBACK). Segunda corrida de
+-- insertar_cohorte.sh: DELETE 576 / INSERT 0 576, 576 filas → re-ejecutable.

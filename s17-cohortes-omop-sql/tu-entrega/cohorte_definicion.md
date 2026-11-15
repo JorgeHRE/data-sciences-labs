@@ -87,3 +87,7 @@ Duración del seguimiento en días desde la fecha índice, por motivo de salida 
 Validaciones: 0 salidas antes del índice y 0 después del fin de la observación. La mediana sin el corte por otro fármaco (1,514 y 1,484 días) coincide con una consulta de islas escrita aparte.
 
 Lo que más pesa es el otro fármaco: el 33 % y el 32 % salen por empezarlo, con una mediana de exactamente 30 días (el añadido en la primera renovación). Esas 66 personas aportan 98 días o menos de seguimiento. Solo el 57 % y el 56 % superan un año. Para un desenlace como la demencia, de aparición lenta, eso limita lo que esta base puede decir (decisión 14).
+
+## Resultado de la actividad 7 (results.cohort)
+
+Las cohortes están en `results.cohort` (cuatro columnas estándar de OMOP; `subject_id` = persona, `cohort_start_date` = fecha índice, `cohort_end_date` = fecha de salida, inclusiva): 1701 lisinopril (122), 1702 amlodipino (81) y, como sensibilidad, 1711 (242) y 1712 (131); 576 filas. Se carga con `./insertar_cohorte.sh` (borra y vuelve a insertar solo las cohortes de este lab dentro de una transacción). Verificado: ninguna fila con fin anterior al inicio, ninguna fecha fuera del periodo de observación y el inicio coincide con la primera receta recalculada (controles 7a-7c); la tabla rechaza duplicados y fines anteriores al inicio (decisiones 15 y 16).
