@@ -26,7 +26,7 @@ Este lab construye y describe las dos cohortes; con los casos disponibles en una
 
 ## Los cuatro componentes
 
-Valen igual para las dos cohortes: en la de amlodipino se intercambian los papeles de los dos fármacos. Las ventanas se escriben en días relativos a la fecha índice (día 0). Lo marcado *(provisional)* se confirma con datos en la actividad 5 y entonces se actualiza aquí.
+Valen igual para las dos cohortes: en la de amlodipino se intercambian los papeles de los dos fármacos. Las ventanas se escriben en días relativos a la fecha índice (día 0). Los criterios clínicos de la actividad 5 ya están medidos (decisiones 11 y 12). Lo que sigue provisional se marca así y se confirma en la actividad 6.
 
 ### 1. Evento inicial
 La primera receta del fármaco en toda la historia de la persona (cualquier producto que lo contenga). Su fecha es la fecha índice, y cada persona aparece una sola vez.
@@ -39,15 +39,32 @@ Antes de los criterios clínicos se aplican tres filtros, que se reportan por se
 
 Criterios de inclusión, cada uno con su ventana:
 - **Edad ≥ 18 años en la fecha índice.** El estudio es sobre adultos. Se comprueba aunque se espera que no quite a nadie (0 menores entre los nuevos usuarios de lisinopril).
-- **Hipertensión diagnosticada** (*Hypertensive disorder* y descendientes) en (−∞, 0]. Es la indicación que hace comparables a los dos fármacos. La ventana es abierta hacia atrás porque la hipertensión es crónica y suele registrarse una sola vez, al diagnosticarse: limitada a [−365, 0], quedarían 388 de 1,522 *(provisional)*.
-- **Al menos 2 visitas en [−365, −1].** Exige actividad real en el año previo, no solo un periodo de observación abierto (controles 0a-0c). Es el criterio de tipo «al menos N en la ventana W» *(provisional: el número y la ventana se deciden en la actividad 5; con el inicio del estudio en 2017, el pico ya no depende de este criterio)*.
+- **Hipertensión diagnosticada** (*Hypertensive disorder* y descendientes) en (−∞, 0]. Es la indicación que hace comparables a los dos fármacos. La ventana es abierta hacia atrás porque la hipertensión es crónica y suele registrarse una sola vez, al diagnosticarse: limitada a [−365, 0], quedarían 388 de 1,522 en la versión sin inicio de estudio (con el inicio en 2017 las dos ventanas casi coinciden: quitan 26 y 36 de 346). El criterio quita 26 de 346 (lisinopril) y 1 de 238 (amlodipino). La HTA se registra una sola vez por persona (339 de 346 tienen menos de 2 registros), así que no sirve para un criterio «al menos N».
+- **Al menos 2 visitas en [−365, −1].** Exige actividad real en el año previo, no solo un periodo de observación abierto (controles 0a-0c). Es el criterio de tipo «al menos N en la ventana W»; no se resuelve con `EXISTS` porque hay que contar (JOIN + `GROUP BY` + `HAVING count(*) >= 2`). N = 2 porque una sola visita puede ser la del propio diagnóstico y 2 exige continuidad; la ventana termina en −1 porque el día 0 es la visita donde se receta, no evidencia de contacto previo. Es el criterio más costoso: quita 147 de 320 (46 %) en lisinopril y 72 de 237 (30 %) en amlodipino; con N = 1 quitaría 80 y 35, con N = 3 más de la mitad (decisión 11).
 
 Criterios de exclusión:
 - **Demencia** (*Dementia* y descendientes) en (−∞, 0]. Sin ella, el desenlace no sería incidente: contaríamos demencias que ya existían.
-- **Uso del otro fármaco** (amlodipino para la cohorte de lisinopril, y al revés) en (−∞, 0], incluido el mismo día 0. Quien empezó los dos a la vez, o ya tomaba el otro, no es nuevo usuario de uno solo. Caso borde *(provisional)*: 3 personas empiezan amlodipino con una combinación que contiene otro IECA u otro antihipertensivo.
+- **Uso del otro fármaco** (amlodipino para la cohorte de lisinopril, y al revés) en (−∞, 0], incluido el mismo día 0. Quien empezó los dos a la vez, o ya tomaba el otro, no es nuevo usuario de uno solo. 
+- **Combinación en el día índice.** El producto del índice tiene más de un ingrediente (lisinopril/HCTZ, amlodipino/benazepril, Tribenzor): inicia dos clases a la vez aunque la otra no sea el comparador. Se excluye (decisión 12). En las cohortes principales quita 0, porque las dos personas que sobrevivían hasta ahí ya tomaban el otro fármaco y salen por el criterio anterior; en la sensibilidad quita 4.
 
 ### 3. Estrategia de salida
 La persona sale de la cohorte cuando termina la exposición continua al fármaco del índice. Las recetas se unen en un tramo continuo si entre el fin de una y el inicio de la siguiente hay 30 días o menos. La fecha de salida es el fin del tramo que empieza en la fecha índice. *(Pendiente para la actividad 6: si al fin del tramo se suman 30 días de persistencia, y si empezar el otro fármaco después del índice también termina la permanencia.)*
 
 ### 4. Censura
 El seguimiento nunca pasa del fin del periodo de observación de la persona: la fecha de salida es la menor entre el fin de la exposición continua y el fin de la observación. Después de esa fecha la base no registra eventos, así que una demencia posterior no se vería.
+
+## Resultado de la actividad 5 (inclusión y exclusión)
+
+Cada criterio lee solo del anterior, así que el reparto de la pérdida depende del orden (la cohorte final no). Cifras de la definición principal, lisinopril / amlodipino:
+
+| Criterio | Tipo y ventana | Quedan | Pierde en secuencia | Pierde solo |
+|---|---|---|---|---|
+| (tras el lavado) | | 346 / 238 | | |
+| Edad ≥ 18 | inclusión, en el índice | 346 / 238 | 0 / 0 | 0 / 0 |
+| Hipertensión | inclusión, (−∞, 0] | 320 / 237 | 26 / 1 | 26 / 1 |
+| ≥ 2 visitas | inclusión, [−365, −1], N = 2 | 173 / 165 | 147 / 72 | 147 / 72 |
+| Demencia previa | exclusión, (−∞, 0] | 172 / 164 | 1 / 1 | 4 / 1 |
+| Otro fármaco | exclusión, (−∞, 0] | 122 / 81 | 50 / 83 | 63 / 102 |
+| Combinación en el índice | exclusión, día 0 | 122 / 81 | 0 / 0 | |
+
+Cohorte tras la actividad 5: **122 de lisinopril y 81 de amlodipino**. La salida (actividad 6) todavía no se aplica.

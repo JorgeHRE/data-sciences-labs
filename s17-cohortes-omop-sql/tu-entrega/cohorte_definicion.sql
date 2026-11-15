@@ -323,14 +323,164 @@ lavado AS (
           AND r.inicio < o.fecha_indice
           AND greatest(r.fin, r.inicio) >= o.fecha_indice - 365
     )
+),
+-- Actividad 5 (decisiones 11 y 12). Criterios clínicos: cada uno lee SOLO
+-- del anterior, así que los conteos del SELECT final son una atrición
+-- secuencial (lo que quita cada criterio DESPUÉS de los previos; el orden
+-- cambia el reparto, no el resultado final).
+-- Dos diferencias entre EXISTS y JOIN, para no confundirlas:
+--   EXISTS / NOT EXISTS: pregunta «¿hay al menos una fila?», sale en cuanto
+--     encuentra una y nunca multiplica filas. Una persona con 12
+--     diagnósticos de HTA sigue siendo UNA fila (trampa del enunciado).
+--   JOIN: trae las filas de la otra tabla; si hay 12, la persona sale 12
+--     veces. Solo se usa cuando se necesita CONTAR (criterio ≥ N, abajo).
+--
+-- 5a. Inclusión: edad ≥ 18 en la fecha índice. Aproximación por año
+-- (año del índice − year_of_birth): se desconoce la fecha exacta de
+-- nacimiento para todos. JOIN con person por su clave primaria: 1 fila por
+-- persona, no multiplica. Se espera que quite 0 (control 5a).
+mayores AS (
+    SELECT l.*
+    FROM lavado l
+    JOIN cdm.person pe USING (person_id)
+    WHERE extract(year FROM l.fecha_indice) - pe.year_of_birth >= 18
+),
+-- 5b. Inclusión: hipertensión (316866 «Hypertensive disorder» y todos sus
+-- descendientes) en (−∞, 0]: cualquier fecha hasta el día índice, incluido.
+-- Ventana abierta hacia atrás porque la HTA es crónica y se registra una
+-- sola vez al diagnosticarse (339 de 346 tienen < 2 registros, así que
+-- tampoco sirve para un criterio «≥ N»). Con el inicio de estudio 2017,
+-- (−∞, 0] y [−365, 0] casi coinciden (26 vs 36 que no cumplen).
+con_hta AS (
+    SELECT m.*
+    FROM mayores m
+    WHERE EXISTS (
+        SELECT 1
+        FROM cdm.condition_occurrence co
+        JOIN cdm.concept_ancestor ca
+          ON ca.descendant_concept_id = co.condition_concept_id
+        WHERE ca.ancestor_concept_id = 316866
+          AND co.person_id = m.person_id
+          AND co.condition_start_date <= m.fecha_indice
+    )
+),
+-- 5c. Inclusión, tipo «al menos N en la ventana W» (decisión 11): ≥ 2
+-- visitas en [−365, −1]. EXISTS no sabe contar: dice «hay una», no «hay
+-- dos». Aquí sí se necesita el JOIN para tener una fila por visita, y
+-- GROUP BY + HAVING para contarlas por persona. Orden lógico: FROM
+-- (persona ⨝ visitas de la ventana) → GROUP BY persona → HAVING count ≥ 2.
+-- El JOIN multiplica a propósito (una fila por visita); el GROUP BY lo
+-- vuelve a dejar en una fila por persona, y la persona se une de vuelta
+-- al CTE por su clave (cohorte, persona), único en cada lado.
+-- Ventana hasta −1: el día 0 es la visita donde se receta, no evidencia
+-- de contacto previo. Quien no tiene ninguna visita no aparece en el JOIN
+-- interno y sale, que es lo que se quiere.
+con_visitas AS (
+    SELECT h.*
+    FROM con_hta h
+    JOIN (
+        SELECT h2.cohort_definition_id, h2.person_id
+        FROM con_hta h2
+        JOIN cdm.visit_occurrence v
+          ON v.person_id = h2.person_id
+         AND v.visit_start_date BETWEEN h2.fecha_indice - 365
+                                    AND h2.fecha_indice - 1
+        GROUP BY h2.cohort_definition_id, h2.person_id
+        HAVING count(*) >= 2
+    ) ok USING (cohort_definition_id, person_id)
+),
+-- 5d. Exclusión: demencia (4182210 «Dementia» y descendientes) en (−∞, 0].
+-- Sin esto el desenlace no sería incidente. Va en (−∞, 0] y no solo en el
+-- año previo: la demencia no desaparece, y un diagnóstico de hace 3 años
+-- sigue excluyendo. NOT EXISTS: deja pasar a quien no tiene ninguna.
+sin_demencia AS (
+    SELECT v.*
+    FROM con_visitas v
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM cdm.condition_occurrence co
+        JOIN cdm.concept_ancestor ca
+          ON ca.descendant_concept_id = co.condition_concept_id
+        WHERE ca.ancestor_concept_id = 4182210
+          AND co.person_id = v.person_id
+          AND co.condition_start_date <= v.fecha_indice
+    )
+),
+-- 5e. Exclusión: ya usa (o empieza el mismo día) el OTRO fármaco, en
+-- (−∞, 0]. Mismo concept_ancestor que `recetas`, pero con el ingrediente
+-- del otro fármaco. Incluye el día 0: quien inicia los dos a la vez no es
+-- nuevo usuario de uno solo (507 casos antes del lavado y del inicio de
+-- estudio). No se limita a 365 días: el filtro es «nuevo usuario de UNO».
+-- Tener el otro fármaco después del índice NO excluye (eso es la salida,
+-- actividad 6).
+sin_otro_farmaco AS (
+    SELECT d.*
+    FROM sin_demencia d
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM results.cohorte_parametros p
+        JOIN cdm.concept_ancestor ca ON ca.ancestor_concept_id = p.ingrediente_otro
+        JOIN cdm.drug_exposure de    ON de.drug_concept_id = ca.descendant_concept_id
+        WHERE p.cohort_definition_id = d.cohort_definition_id
+          AND de.person_id = d.person_id
+          AND de.drug_type_concept_id = 32838
+          AND de.drug_exposure_start_date <= d.fecha_indice
+    )
+),
+-- 5f. Exclusión: el producto del índice es una combinación (decisión 12).
+-- Un producto con más de un ingrediente (lisinopril/HCTZ, amlodipino/
+-- benazepril, Tribenzor) inicia DOS clases a la vez, aunque la otra no sea
+-- el comparador. Se cuenta ingredientes distintos en drug_strength. Las
+-- recetas consideradas son las del día índice (inicio = fecha_indice).
+sin_combinacion AS (
+    SELECT o.*
+    FROM sin_otro_farmaco o
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM recetas r
+        WHERE r.cohort_definition_id = o.cohort_definition_id
+          AND r.person_id = o.person_id
+          AND r.inicio = o.fecha_indice
+          AND r.drug_concept_id IN (
+              SELECT drug_concept_id
+              FROM cdm.drug_strength
+              GROUP BY drug_concept_id
+              HAVING count(DISTINCT ingredient_concept_id) > 1)
+    )
 )
--- Resultado (2026-11-15), 16 filas (4 pasos × 4 cohortes), < 1 s;
+-- Resultado (2026-11-15), 44 filas (11 pasos × 4 cohortes), ~17 s;
 -- filas = distintos en todas:
 --   paso                         1701    1702  |  1711    1712 (sensibilidad)
 --   0 recetas del fármaco      42,085  34,475  | 42,085  34,475
 --   1 evento inicial            1,522   1,104  |  1,522   1,104
 --   2 índice en periodo estudio   346     238  |  1,522   1,104
 --   3 + 365 días de observación   346     238  |  1,522   1,104  (pérdida 0)
+--   4 + lavado 365 días           346     238  |  1,522   1,104  (pérdida 0)
+--   5a + edad ≥ 18                346     238  |  1,522   1,104  (pérdida 0)
+--   5b + hipertensión (−∞, 0]     320     237  |  1,447   1,102
+--   5c + ≥ 2 visitas [−365, −1]   173     165  |    421     340
+--   5d − demencia previa          172     164  |    409     329
+--   5e − otro fármaco previo      122      81  |    246     131
+--   5f − combinación en índice    122      81  |    242     131
+-- Actividad 5 (decisiones 11 y 12). Cohorte final de la definición
+-- principal: 122 lisinopril y 81 amlodipino (35 % y 34 % de las 346 / 238).
+-- Pérdida de cada criterio en secuencia (lisinopril / amlodipino):
+--   HTA 26 / 1 · visitas 147 / 72 · demencia 1 / 1 · otro fármaco 50 / 83 ·
+--   combinación 0 / 0 · edad 0 / 0.
+-- Solo, cada criterio quita más o igual que en secuencia (HTA 26/1, visitas
+-- 147/72, demencia 4/1, otro fármaco 63/102): en secuencia los que ya
+-- salieron antes no se cuentan otra vez. El orden reparte la pérdida, no
+-- cambia la cohorte final. El criterio de visitas es el más costoso en
+-- lisinopril (42 % de lo que le llega); el del otro fármaco, en amlodipino
+-- (51 % de lo que le llega).
+-- 5f quita 0 en 1701/1702 por una razón comprobada, no por un error: las dos
+-- personas que sobrevivían a HTA y visitas con un producto combinado (4289:
+-- lisinopril/HCTZ; 4506: amlodipino/benazepril) ya tomaban el otro fármaco
+-- y salen en 5e. El criterio sí funciona: en la sensibilidad (1711) quita 4.
+-- Las visitas se cuentan por fila, no por día distinto. Contar días
+-- distintos cambia 0 personas en 1701/1702 (173 y 165 en ambos) y quita 9 y
+-- 1 en la sensibilidad 1711/1712 (421 → 412, 340 → 339): no afecta a la
+-- definición principal.
 -- Actividad 3c: el inicio de estudio quita 1,176 (77.3 %) y 866 (78.4 %);
 -- incluye los 665 / 545 del pico de 2016. Costo: demencias incidentes antes
 -- de los demás criterios 3 / 2 (60 / 38 sin el filtro) → con esta base no
@@ -375,6 +525,30 @@ UNION ALL
 SELECT '4 + lavado 365 días', cohort_definition_id,
        count(*), count(DISTINCT person_id)
 FROM lavado GROUP BY cohort_definition_id
+UNION ALL
+SELECT '5a + edad ≥ 18', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM mayores GROUP BY cohort_definition_id
+UNION ALL
+SELECT '5b + hipertensión (−∞, 0]', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM con_hta GROUP BY cohort_definition_id
+UNION ALL
+SELECT '5c + ≥ 2 visitas en [−365, −1]', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM con_visitas GROUP BY cohort_definition_id
+UNION ALL
+SELECT '5d − demencia previa', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM sin_demencia GROUP BY cohort_definition_id
+UNION ALL
+SELECT '5e − otro fármaco previo', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM sin_otro_farmaco GROUP BY cohort_definition_id
+UNION ALL
+SELECT '5f − combinación en el índice', cohort_definition_id,
+       count(*), count(DISTINCT person_id)
+FROM sin_combinacion GROUP BY cohort_definition_id
 ORDER BY paso, cohort_definition_id;
 -- [FIN cohorte] ========================================================
 
@@ -495,3 +669,21 @@ SELECT c AS cohorte,
 FROM con_pasado
 WHERE inicio >= DATE '2017-01-01'
 GROUP BY c ORDER BY c;
+
+-- Control 5a. ¿Los conceptos de los criterios son lo que creemos, y year_of_birth
+-- sirve para la edad? Un id mal tecleado no daría error: daría un criterio vacío.
+-- Resultado (2026-11-15):
+--   316866  Hypertensive disorder · Condition · Disorder · S · vigente
+--   4182210 Dementia              · Condition · Disorder · S · vigente
+--   person: 5,904 filas, year_of_birth NULL 0 (rango 1916-2026; el 2026 no es
+--   un adulto, pero ninguno entra a la cohorte: el criterio 5a quita 0).
+SELECT concept_id, concept_name, domain_id, concept_class_id,
+       standard_concept, invalid_reason
+FROM cdm.concept
+WHERE concept_id IN (316866, 4182210)
+ORDER BY concept_id;
+
+SELECT count(*) AS personas,
+       count(*) FILTER (WHERE year_of_birth IS NULL) AS yob_nulo,
+       min(year_of_birth) AS min_yob, max(year_of_birth) AS max_yob
+FROM cdm.person;
