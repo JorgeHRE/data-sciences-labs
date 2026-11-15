@@ -99,3 +99,25 @@ La tabla completa y el análisis están en [atricion.md](atricion.md). Resumen d
 ## Resultado de la actividad 9 (caracterización)
 
 La tabla 1 y la figura del seguimiento están en [caracterizacion.md](caracterizacion.md). Cohortes jóvenes (mediana de 40 y 44 años), mujeres alrededor del 58 %, seguimiento mediano de 2.5 y 1.1 años (42 % y 41 % salen en los primeros 6 meses). 8 de 17 filas tienen |SMD| > 0.1, pero con 122 y 81 personas el SMD es ruidoso (error típico ≈ 0.14). La ventana de 365 días subestima las enfermedades crónicas (decisión 18).
+
+## Resultado de la actividad 10 (immortal time)
+
+**Pregunta:** ¿algún criterio usa información posterior a la fecha índice para decidir quién entra, o para clasificar su exposición?
+
+**Respuesta: no.** Revisé cada ventana del SQL (comprobaciones en `inmortal_time.sql`):
+
+| Criterio | Ventana | ¿Mira después del índice? |
+|---|---|---|
+| Índice = 1.ª receta de toda la historia; inicio de estudio 2017 | pasado / calendario | No |
+| Observación previa y lavado | [−365, −1] | No |
+| Edad ≥ 18 | en el índice | No |
+| HTA, demencia previa, otro fármaco | (−∞, 0] | No (incluyen el día 0, ver abajo) |
+| ≥ 2 visitas | [−365, −1] | No (el día 0 queda fuera a propósito) |
+| Combinación en el índice | día 0 | No |
+| Salida: tramo, +30 d, corte por otro fármaco | posterior | Sí, pero es la **salida**, no la entrada ni la exposición |
+
+Por qué no hay immortal time: la exposición se asigna en el índice (la persona entra en la cohorte del fármaco que recibe ese día) y el seguimiento empieza ese mismo día, así que no existe un periodo entre el inicio de la cohorte y el de la exposición durante el cual no pueda ocurrir el desenlace. No se clasifica a nadie por su exposición posterior («usuarios persistentes», «≥ 2 recetas»), que es la forma típica de crear immortal time. Comprobado con datos: el `JOIN` de la salida con el tramo del índice no pierde a nadie (122 / 81 / 242 / 131 antes y después) y la duración mínima del seguimiento es de 1 día (lisinopril) y 7 días (amlodipino).
+
+**Lo que sí hay que decir (el día 0).** 73 de 122 (60 %) en lisinopril y 43 de 81 (53 %) en amlodipino cumplen el criterio de HTA **solo** por un diagnóstico registrado el propio día índice. No es información posterior, pero el ETL no dice si el diagnóstico se anotó antes o después de la receta. Si el diagnóstico se hizo *a raíz* de empezar el fármaco, esa parte de la inclusión dependería de algo que ocurre tras la decisión de tratar. Para demencia no ocurre (0 casos solo del día 0; las exclusiones son 1 / 1). Se mantiene (−∞, 0] porque la HTA del día 0 es la indicación de la receta y no su consecuencia, y la ventana no pasa del día 0; queda como limitación (decisión 20).
+
+**Otra cosa que no es immortal time pero sí usa el futuro:** el corte de la salida cuando empieza el otro fármaco (actividad 6) es censura informativa, no tiempo inmortal. Cambia a quién se sigue, no cuándo empieza el riesgo (decisión 14).
