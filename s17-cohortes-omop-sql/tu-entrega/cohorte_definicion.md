@@ -91,3 +91,7 @@ Lo que más pesa es el otro fármaco: el 33 % y el 32 % salen por empezarlo, con
 ## Resultado de la actividad 7 (results.cohort)
 
 Las cohortes están en `results.cohort` (cuatro columnas estándar de OMOP; `subject_id` = persona, `cohort_start_date` = fecha índice, `cohort_end_date` = fecha de salida, inclusiva): 1701 lisinopril (122), 1702 amlodipino (81) y, como sensibilidad, 1711 (242) y 1712 (131); 576 filas. Se carga con `./insertar_cohorte.sh` (borra y vuelve a insertar solo las cohortes de este lab dentro de una transacción). Verificado: ninguna fila con fin anterior al inicio, ninguna fecha fuera del periodo de observación y el inicio coincide con la primera receta recalculada (controles 7a-7c); la tabla rechaza duplicados y fines anteriores al inicio (decisiones 15 y 16).
+
+## Resultado de la actividad 8 (atrición)
+
+La tabla completa y el análisis están en [atricion.md](atricion.md). Resumen de la definición principal (lisinopril / amlodipino): 1,522 / 1,104 personas con evento inicial → 346 / 238 con índice desde 2017 → 173 / 165 tras la inclusión → **122 / 81** tras la exclusión (8.0 % y 7.3 %). Costó más el inicio de estudio (77 %), y entre los criterios clínicos, las visitas en lisinopril y el otro fármaco en amlodipino. En esas cohortes no hay demencias incidentes en el seguimiento (0 en 373 y 216 años-persona), así que esta base no permite estudiar el desenlace.

@@ -619,57 +619,81 @@ salida_motivo AS (
 -- inicio en 1,772 y 1,201 recetas («en curso» del ETL, lab 13).
 -- [CONTEO] Los scripts de figuras cortan el bloque en esta línea y añaden
 -- su propio SELECT: así usan exactamente los mismos CTE.
--- Conteo de cada paso. «filas» y «distintos» deben coincidir:
+-- Actividad 8. TABLA DE ATRICIÓN: una fila por paso y cohorte.
+-- Conteo de cada paso («filas» y «distintos» deben coincidir):
 --   recetas:        distintos = drug_exposure_id distintos (JOIN sin duplicar)
 --   evento_inicial: distintos = person_id distintos (trampa del enunciado)
-SELECT '0 recetas del fármaco' AS paso, cohort_definition_id,
-       count(*) AS filas, count(DISTINCT drug_exposure_id) AS distintos
-FROM recetas GROUP BY cohort_definition_id
-UNION ALL
-SELECT '1 evento inicial', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM evento_inicial GROUP BY cohort_definition_id
-UNION ALL
-SELECT '2 índice en el periodo de estudio', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM periodo_estudio GROUP BY cohort_definition_id
-UNION ALL
-SELECT '3 + 365 días de observación', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM obs_previa GROUP BY cohort_definition_id
-UNION ALL
-SELECT '4 + lavado 365 días', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM lavado GROUP BY cohort_definition_id
-UNION ALL
-SELECT '5a + edad ≥ 18', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM mayores GROUP BY cohort_definition_id
-UNION ALL
-SELECT '5b + hipertensión (−∞, 0]', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM con_hta GROUP BY cohort_definition_id
-UNION ALL
-SELECT '5c + ≥ 2 visitas en [−365, −1]', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM con_visitas GROUP BY cohort_definition_id
-UNION ALL
-SELECT '5d − demencia previa', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM sin_demencia GROUP BY cohort_definition_id
-UNION ALL
-SELECT '5e − otro fármaco previo', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM sin_otro_farmaco GROUP BY cohort_definition_id
-UNION ALL
-SELECT '5f − combinación en el índice', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM sin_combinacion GROUP BY cohort_definition_id
-UNION ALL
-SELECT '6 con fecha de salida', cohort_definition_id,
-       count(*), count(DISTINCT person_id)
-FROM salida_motivo GROUP BY cohort_definition_id
-ORDER BY paso, cohort_definition_id;
+-- Columnas calculadas con funciones de ventana (no agrupan: añaden una columna
+-- a cada fila conservando las filas). Orden lógico: FROM (la unión de pasos)
+-- → SELECT con las ventanas → ORDER BY.
+--   n                : personas que quedan tras el paso.
+--   perdidos         : n del paso anterior − n (lag = valor de la fila previa
+--                      de la misma cohorte, por orden de paso).
+--   pct_perdido_paso : perdidos / n anterior. «Cuánto del paso previo se pierde».
+--   pct_queda        : n / n del evento inicial (first_value). «Cuánto del
+--                      punto de partida sobrevive»: es el % del enunciado.
+-- La ventana se parte también por es_persona: el paso 0 cuenta RECETAS, no
+-- personas; no se compara con los pasos de personas (queda en su propia
+-- partición y sus porcentajes salen NULL).
+SELECT cohort_definition_id AS cohorte, paso, filas, distintos AS n,
+       lag(distintos) OVER w - distintos AS perdidos,
+       round(100.0 * (lag(distintos) OVER w - distintos)
+             / lag(distintos) OVER w, 1) AS pct_perdido_paso,
+       CASE WHEN paso NOT LIKE '0 %'   -- recetas: sin porcentaje (NULL)
+            THEN round(100.0 * distintos / first_value(distintos) OVER w, 1)
+       END AS pct_queda
+FROM (
+    SELECT '0 recetas del fármaco' AS paso, cohort_definition_id,
+           count(*) AS filas, count(DISTINCT drug_exposure_id) AS distintos
+    FROM recetas GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '1 evento inicial', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM evento_inicial GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '2 índice en el periodo de estudio', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM periodo_estudio GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '3 + 365 días de observación', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM obs_previa GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '4 + lavado 365 días', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM lavado GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '5a + edad ≥ 18', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM mayores GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '5b + hipertensión (−∞, 0]', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM con_hta GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '5c + ≥ 2 visitas en [−365, −1]', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM con_visitas GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '5d − demencia previa', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM sin_demencia GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '5e − otro fármaco previo', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM sin_otro_farmaco GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '5f − combinación en el índice', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM sin_combinacion GROUP BY cohort_definition_id
+    UNION ALL
+    SELECT '6 con fecha de salida', cohort_definition_id,
+           count(*), count(DISTINCT person_id)
+    FROM salida_motivo GROUP BY cohort_definition_id
+) p
+WINDOW w AS (PARTITION BY cohort_definition_id, (paso NOT LIKE '0 %')
+             ORDER BY paso)
+ORDER BY cohort_definition_id, paso;
 -- [FIN cohorte] ========================================================
 
 -- Control 2c. ¿Con qué producto entra cada persona, y hay empates el día índice?
