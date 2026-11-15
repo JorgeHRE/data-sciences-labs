@@ -1,0 +1,6 @@
+# Lab 17 — entorno para las figuras (consultas de solo lectura al Postgres del lab 12)
+pandas
+sqlalchemy
+psycopg2-binary
+matplotlib
+python-dotenv
