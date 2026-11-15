@@ -38,3 +38,9 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Decisión:** el inicial es el paso 0 (primera receta de toda la historia): 1,522 en 1701 y 1,104 en 1702.
 - **Alternativas:** las 346 / 238 con índice desde 2017 (tratar el inicio de estudio como parte de la población, no como criterio).
 - **Por qué:** es el mismo inicial que `atricion.md` del lab 17, así las dos tablas son comparables, y deja visible que el criterio más caro es el inicio de estudio y no uno clínico. Con 346 como inicial la cohorte final sería el 35 % en vez del 8.0 %.
+
+## 8. Qué dos criterios se reordenan (actividad 3)
+- **Decisión:** intercambiar «≥ 2 visitas en [−365, −1]» y «sin otro fármaco previo» (pasos 6 y 8 del orden del lab 17). El orden B es solo otro archivo (`orden_b.sql`); la consulta no cambia.
+- **Alternativas:** inicio de estudio ↔ visitas (la demostración más dramática: el criterio más caro, 77 %, pasaría al final, pero mezcla una decisión sobre los datos con un criterio clínico); hipertensión ↔ demencia previa (dos criterios chicos, la diferencia casi no se vería).
+- **Por qué:** son los dos criterios clínicos que más cuestan, así que el cambio de orden se nota (otro fármaco 50 → 63, visitas 147 → 133) sin tocar la definición. La verificación pedida (N final igual) se cumple: 122 y 81 en los dos órdenes.
+- **Además se midió** cuántas personas falla cada criterio por sí solo (las visitas, 1,035 de 1,522) y el contraste del índice (filtrar por fecha antes de la primera receta daría 1,233 / 934). No son parte de lo que pide el enunciado: sirven para explicar por qué el costo depende del orden.
