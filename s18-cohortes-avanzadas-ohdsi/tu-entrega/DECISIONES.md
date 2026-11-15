@@ -17,3 +17,13 @@ Formato: qué se decidió, qué alternativas había y por qué se eligió esta.
 - **Alternativas:** elegir como principal la variante que resulte con mejor N o mejor caracterización después de verlas.
 - **Por qué:** declararla antes de mirar las variantes es lo que separa un análisis de sensibilidad de un p-hacking (actividad 11). Esta decisión queda en un commit anterior a cualquier tabla de la actividad 9.
 - **Transparencia:** al planear el lab (2026-11-15) se miraron conteos preliminares de las variantes, solo de la observación previa y del índice relajado (346 / 346 / 344 y 348 / 348 / 348 personas antes de aplicar los demás criterios). La definición principal ya estaba fijada desde el lab 17 y esos números no la cambiaron; se deja dicho para que quien audite el repositorio lo sepa.
+
+## 4. Desenlace de la factibilidad (actividad 1)
+- **Decisión:** el veredicto se dicta con la **demencia** (la pregunta del lab 17): 0 eventos → no factible. Se añade una tabla **exploratoria**, marcada como tal, con otros desenlaces (ERC 13, diabetes tipo 2 2, infarto 1, ACV 0) solo para argumentar qué cambiar.
+- **Alternativas:** usar solo la demencia sin tabla; cambiar el desenlace principal a la ERC (13 eventos).
+- **Por qué:** cambiar el desenlace después de ver que el original sale en 0 es elegir la pregunta según el resultado, lo que la decisión 3 quiere evitar. La tabla exploratoria informa la recomendación (qué cambiar) sin convertirse en el análisis principal; el documento aclara que los otros desenlaces se miraron después.
+
+## 5. Qué es «seguimiento» y «evento» en los tres conteos
+- **Decisión:** seguimiento = fecha de salida − fecha índice (`results.cohort`); evento = primera demencia en (índice, salida] en personas sin demencia previa. Como contraste, no como definición, se mide también el seguimiento hasta el fin del `observation_period`.
+- **Alternativas:** medir hasta el fin del periodo de observación (más seguimiento, pero ya no es la cohorte del lab 17); contar registros en lugar de personas.
+- **Por qué:** los conteos auditan la cohorte tal como quedó. El contraste mostró algo que el conteo solo no veía: 2 personas de 1701 tienen demencia después de salir (por el corte al empezar el otro fármaco, decisión 14 del lab 17). El veredicto no cambia (2 eventos < 10), pero el 0 era en parte censura. Se cuentan personas distintas porque un diagnóstico se repite en cada visita.
