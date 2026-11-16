@@ -11,6 +11,7 @@ Contenido de este documento (se completa actividad por actividad):
 5. [Incidencia por año y por edad](#5-incidencia-por-año-y-por-edad)
 6. [Qué códigos metieron a la gente](#6-qué-códigos-metieron-a-la-gente)
 7. [Conceptos huérfanos](#7-conceptos-huérfanos)
+8. [El SQL que no escribí: ATLAS y CIRCE](#8-el-sql-que-no-escribí-atlas-y-circe)
 
 ---
 
@@ -324,3 +325,55 @@ Un huérfano es un código que aparece con frecuencia en la base, se parece a lo
 **Pre-eclampsia dentro del set (decisión 16).** El código 439393 es descendiente de «Hypertensive disorder» (316866), así que cuenta como hipertensión para el criterio, aunque es un trastorno del embarazo, transitorio y distinto de la hipertensión crónica. 62 personas de la base cumplirían el criterio solo por él, pero ninguna llega a tu cohorte (0 entre las primeras recetas y 0 en la final). Como el impacto es 0, se **mantiene el concept set del lab 17 sin cambios** y se declara; si el set se reutiliza en otra cohorte conviene excluir 439393. La misma lógica vale para «Eclampsia in pregnancy», que no está en el set: ninguna de las personas que fallan solo el criterio de hipertensión lo tiene. Que un trastorno hipertensivo del embarazo esté dentro del set y otro fuera muestra que el set no es coherente en ese punto, pero ninguno de los dos debería definir hipertensión crónica.
 
 **Lo que no se hizo:** no se comparó con la definición publicada en la OHDSI Phenotype Library (el recurso lo propone como referencia); queda pendiente. Tampoco se consideró cada concepto del vocabulario: la búsqueda es por texto, y un código sin parecido de nombre con lo buscado no aparecería.
+
+---
+
+## 8. El SQL que no escribí: ATLAS y CIRCE
+
+Código: [`comparar_atlas.py`](comparar_atlas.py) y [`atlas_impacto.sql`](atlas_impacto.sql), que generan [`comparacion_atlas.md`](comparacion_atlas.md). El SQL exportado por ATLAS (`atlas_export.sql`) **no se versiona** (está en el `.gitignore`: el enunciado pide no copiarlo, es largo y está escrito para cinco motores); `comparar_atlas.py` avisa y sale si no existe. Las referencias a líneas son del export del 2026-11-15.
+
+### Qué se reconstruyó
+
+La cohorte 1701 en la demo pública de ATLAS (datos sintéticos; solo para exportar el SQL). Cuatro concept sets con *Include Descendants* (lisinopril 1308216, amlodipino 1332418, *Hypertensive disorder* 316866, demencia 4182210) y uno de visitas (9201, 9202, 9203).
+
+| elemento | en ATLAS | en el SQL del lab 17 |
+|---|---|---|
+| Evento inicial | Drug Exposure, lisinopril; primer evento por persona; observación continua 365 días antes, 0 después | primera receta de la historia; `obs_previa` |
+| Adulto | Demographic: edad ≥ 18 | año del índice − `year_of_birth` ≥ 18 |
+| Hipertensión | Condition Occurrence, al menos 1, de *all days before* a 0 *days after* | (−∞, 0], con el día 0 |
+| Dos visitas | Visit Occurrence (cualquiera), al menos 2, de 365 a 1 día antes | [−365, −1] |
+| Sin demencia / sin amlodipino | exactamente 0, de *all days before* a 0 *days after* | (−∞, 0] |
+| Inicio de estudio | **regla de inclusión** sobre la fecha del índice ≥ 2017-01-01 | `periodo_estudio`, después de la primera receta |
+| Salida | fin de exposición continua al lisinopril, *persistence window* 30; censura con amlodipino | tramo con hueco de 30 días, +30 días, corte por amlodipino |
+| *Collapse Settings* | por defecto: `ERA`, `EraPad` 0 | — |
+
+**No se expresó** el lavado de 365 días (vacío por construcción con la primera receta de la historia, actividad 4 del lab 17) ni «sin combinación en el índice» (no tiene equivalente directo en la interfaz).
+
+### Resultado de la comparación
+
+El SQL exportado se ejecutó contra la base (sustituyendo los marcadores `@...` por los esquemas, con el destino en una tabla temporal de la sesión: no se escribe nada persistente) y se comparó con `results.cohort` persona por persona (decisión 17):
+
+| *surveillance window* | personas ATLAS | en ambas | solo ATLAS | solo 1701 | misma fecha índice | misma fecha de salida |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 122 | 122 | 0 | 0 | 122 | 67 |
+| 30 | 122 | 122 | 0 | 0 | 122 | **122** |
+
+**Las dos definiciones entran exactamente igual:** las mismas 122 personas con la misma fecha índice, incluidas las reglas de observación, hipertensión, visitas, demencia, amlodipino y el inicio de estudio. El inicio de estudio como **regla de inclusión** fue la decisión correcta: ATLAS fija «la primera» antes de las reglas (`WHERE P.ordinal = 1`, líneas 64-87) y aplica la fecha después (línea 337), el mismo orden que el SQL del lab 17; como atributo del evento inicial habría filtrado antes de tomar la primera y habría dado otra cohorte.
+
+**La salida es lo único que difería, y es un parámetro de ATLAS.** Con el *surveillance window* en 0 (primer intento), la salida coincidía en 67 de 122: en 23 diferían exactamente 30 días y en 32 la salida de 1701 es el fin del periodo de observación y la de ATLAS queda entre 1 y 28 días antes. La causa: el SQL del lab 17 **añade 30 días** después del fin de la exposición, y en ATLAS eso no es el *persistence window* (que solo **une** recetas con huecos de hasta 30 días) sino el ***surveillance window*** (el desplazamiento). Con el *surveillance* en 30, las 122 salidas coinciden.
+
+### Tres cosas que CIRCE hace y yo no
+
+1. **Recorta todas las ventanas al periodo de observación (A).** CIRCE exige que cada diagnóstico, visita o receta de un criterio caiga dentro de `[OP_START_DATE, OP_END_DATE]` y descarta cualquier registro fuera de observación (líneas 161, 206, 254 y 302 del export). En mis 122 pacientes el impacto es 0 (ninguno tiene diagnósticos de hipertensión previos al periodo, aunque en toda la base hay 614 diagnósticos de cualquier tipo anteriores al inicio del periodo), pero importa en otra fuente: evita basar criterios de inclusión o exclusión en registros previos a la afiliación o fuera de cobertura.
+2. **Elige «la primera» solo entre eventos con observación previa, con desempate fijo (B).** CIRCE filtra primero las recetas que ya tienen 365 días de observación previa y luego toma la primera con `ORDER BY start_date, event_id` (líneas 69 y 84-87). En mi cohorte no cambia nada (todas las primeras recetas ya cumplían la observación previa, y los 44 empates de varias recetas el día índice tienen la misma fecha), pero en una base con varios periodos de observación o interrupciones cambiaría qué evento se vuelve el índice.
+3. **Sanea el fin de la receta cuando falta (C).** CIRCE calcula el fin con `COALESCE(fin, inicio + días de suministro, inicio + 1)` (línea 78) para que nunca sea nulo. Aquí no cambia los 122 (no hay fines nulos), y protege contra `drug_exposure_end_date` nulos en otras bases, donde sin ello se perdería exposición en el lavado o la persistencia. **Nota:** `COALESCE` solo rellena un fin nulo; un fin anterior al inicio lo deja igual. Las 83 recetas de lisinopril con fin anterior al inicio las corrige el `greatest(fin, inicio)` del SQL del lab 17, que es algo que **yo hacía y CIRCE no**; en estos datos tampoco cambia el resultado.
+
+Otras diferencias de código revisadas, con impacto 0 aquí: CIRCE solo expande a conceptos **válidos** (`invalid_reason is null`; ningún concept set tiene conceptos inválidos), y separa la **brecha** y el **desplazamiento** de la salida como dos parámetros (el hallazgo de arriba).
+
+### Tropiezos de la reconstrucción, y lo que enseñan
+
+- **ATLAS no avisa de una cohorte incompleta.** El SQL no se generaba, sin ningún mensaje, hasta elegir el concept set de la estrategia de salida (en el JSON, `DrugCodesetId` ausente). Las cinco reglas de inclusión estaban creadas con nombre y descripción pero con `CriteriaList` vacío: una regla vacía se guarda sin error.
+- **Un valor por defecto o un operador cambia la definición sin avisar.** La edad quedó en `gt` (mayor que 18) en lugar de `gte`; la fecha del inicio de estudio, en `lte` (índice **hasta** 2017, justo lo contrario); la observación continua venía en 0 días; y el concept set de visitas tenía `8717` (*Inpatient Hospital*, de *CMS Place of Service*) en lugar de `9201` (*Inpatient Visit*). Ninguno daba un error: todos se detectaron leyendo el JSON.
+- **El menú «all / distinct» de las visitas.** El JSON traía `CountColumn: DOMAIN_CONCEPT` sin `IsDistinct`; al alternar el menú apareció `IsDistinct: true`, que habría contado visitas distintas. El SQL exportado confirma que la regla final cuenta todas (`HAVING COUNT(cc.event_id) >= 2`, línea 208, sin `DISTINCT`).
+- **Dos de los parámetros de ATLAS que no había decidido:** el *Collapse Settings* (`ERA`, `EraPad` 0 por defecto) y la separación entre *persistence window* y *surveillance window*.
+- **Lo que enseña:** revisar el **JSON** de una definición, no solo la pantalla, y comparar la cohorte generada con la propia, persona por persona, es la única forma de saber que «reconstruí lo mismo».
