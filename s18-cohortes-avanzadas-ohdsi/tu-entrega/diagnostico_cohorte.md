@@ -434,3 +434,20 @@ Generado por [`tabla_traslape.py`](tabla_traslape.py) (también [`traslape_tabla
 - **¿Cuántos en las tres?** 121 de 122 en lisinopril (99.2 %) y 81 de 81 en amlodipino. **¿Cuántos solo en la más laxa?** Ninguno: el lavado de 180 d no añade a nadie que no esté ya en el de 365 d. La única persona que no está en las tres (la 4993) está en 180 y 365 d, no en 730 d.
 - **Trampa del enunciado (anidamiento): se cumple y está verificado.** El script falla si no se cumple 730 ⊆ 365 ⊆ 180 ⊆ sin inicio, persona por persona, y comprueba además que quien aparece en varias cohortes entra **con la misma fecha índice**. Esto no estaba garantizado por construcción: con la definición (c) el índice es la primera receta que cumple observación y lavado de *W* días, y podría haberse movido con *W*. Aquí no se mueve para nadie. Si hubiera fallado, habría sido señal de un error de implementación.
 - **Lectura:** el traslape casi total confirma la sección 9: las tres variantes no son tres poblaciones, son **una** población (con una persona de diferencia). El único traslape que no es casi total es con la cohorte sin inicio de estudio: la cohorte principal es la **mitad** de ella (122 de 242; 81 de 131).
+
+
+## 11. Discusión
+
+La decisión que más pesa en esta cohorte es el inicio de estudio en 2017: sin él, la cohorte se duplica de 122 a 242 personas, la mediana de edad sube de 40 a 50 años, el seguimiento mediano aumenta de 2.5 a 7.2 años y la hipertensión registrada en el año previo cae del 96 % al 53 % (de las 120 personas que se suman, 61 tienen su índice en 2016, el año del pico artificial de captura, con 665 primeras recetas, el 44 % de toda la historia; las otras 59 tienen índices anteriores), mientras que variar el lavado entre 180, 365 y 730 días mueve a lo sumo una persona y reordenar los criterios no cambia el N final. Por ello se mantiene la definición principal declarada en el paso 0 antes de ver las variantes —la cohorte 1701 con lavado de 365 días e inicio de estudio en 2017—, ya que el corte de 2017 deja fuera ese pico de 2016 y los 365 días son la convención habitual de nuevo usuario. La limitación más crítica del estudio es que se registran 0 demencias incidentes en una cohorte joven (solo el 11 % tiene ≥ 65 años), lo que impide ajustar siquiera una variable bajo la regla de ~10 eventos por variable, e incluso siguiendo a los pacientes hasta el fin de su observación sin censurar por el otro fármaco apenas se observan 2 eventos (0.36 por 100 años-persona; IC 95 % 0.04–1.3). Adicionalmente, el criterio de hipertensión incluye pre-eclampsia en el concept set (62 personas en la base, impacto 0 en la cohorte) y deja fuera a 915 personas en la base con presión elevada sin diagnóstico (que llevarían la cohorte de 122 a 125 con el umbral usado), mientras que los datos muestran que el periodo de observación termina en la última visita, existen 614 diagnósticos anteriores al inicio del periodo en toda la base (impacto 0 en las 122 personas) y el seguimiento mediano con ~120 personas resulta frágil (una sola persona lo desplazó 185 días).
+
+**De dónde sale cada cifra:** inicio de estudio, 242, mediana de 50 años, 7.2 años y 53 % contra 96 %: sección 9 ([`variantes_tablas.md`](variantes_tablas.md)); pico de 2016 (665, 44 %): sección 5; 61 de las 120 personas con índice en 2016 (7 en 2015 y 52 anteriores): consulta de la actividad 11 sobre `results.cohort` 1711 contra 1701 (abajo); lavado y traslape: secciones 9 y 10; orden de los criterios: sección 2; 0 demencias, 2 eventos y 0.36 por 100 años-persona: sección 1; 11 % ≥ 65 años: sección 1; pre-eclampsia, 915 personas y 122 → 125: sección 7; 614 diagnósticos: sección 8; 185 días: sección 9.
+
+Las 120 personas que solo entran sin el inicio de estudio, por año de su fecha índice (2016: 61; 2015: 7; 2005-2014: 24; antes de 2005: 28):
+
+```sql
+SELECT extract(year FROM s.cohort_start_date)::int AS anio, count(*)
+FROM results.cohort s
+WHERE s.cohort_definition_id = 1711
+  AND s.subject_id NOT IN (SELECT subject_id FROM results.cohort WHERE cohort_definition_id = 1701)
+GROUP BY 1 ORDER BY 1;
+```
