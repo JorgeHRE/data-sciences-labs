@@ -2,7 +2,7 @@
 
 Auditoría de la cohorte de **nuevos usuarios de lisinopril con hipertensión** (`cohort_definition_id` 1701, índice desde 2017-01-01, N = 122) construida en el lab 17 sobre la base OMOP sintética del lab 12 (PostgreSQL, vocabulario v5.0 29-AUG-26). La cohorte 1702 (amlodipino, N = 81) se mide en paralelo cuando no cuesta nada. Todo el SQL es de solo lectura sobre `results.cohort` y `cdm`; las decisiones están en `DECISIONES.md`.
 
-Contenido de este documento (se completa actividad por actividad):
+Contenido de este documento (resumen, archivos y cómo reproducirlo: [`README.md`](README.md)):
 
 1. [Factibilidad a posteriori](#1-factibilidad-a-posteriori)
 2. [Tabla de atrición](#2-tabla-de-atrición)
@@ -13,6 +13,8 @@ Contenido de este documento (se completa actividad por actividad):
 7. [Conceptos huérfanos](#7-conceptos-huérfanos)
 8. [El SQL que no escribí: ATLAS y CIRCE](#8-el-sql-que-no-escribí-atlas-y-circe)
 9. [Tres variantes de lavado](#9-tres-variantes-de-lavado)
+10. [Traslape de las variantes](#10-traslape-de-las-variantes)
+11. [Discusión](#11-discusión)
 
 ---
 
