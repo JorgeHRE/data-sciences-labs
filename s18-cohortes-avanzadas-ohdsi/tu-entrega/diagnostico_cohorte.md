@@ -12,6 +12,7 @@ Contenido de este documento (se completa actividad por actividad):
 6. [Qué códigos metieron a la gente](#6-qué-códigos-metieron-a-la-gente)
 7. [Conceptos huérfanos](#7-conceptos-huérfanos)
 8. [El SQL que no escribí: ATLAS y CIRCE](#8-el-sql-que-no-escribí-atlas-y-circe)
+9. [Tres variantes de lavado](#9-tres-variantes-de-lavado)
 
 ---
 
@@ -377,3 +378,39 @@ Otras diferencias de código revisadas, con impacto 0 aquí: CIRCE solo expande 
 - **El menú «all / distinct» de las visitas.** El JSON traía `CountColumn: DOMAIN_CONCEPT` sin `IsDistinct`; al alternar el menú apareció `IsDistinct: true`, que habría contado visitas distintas. El SQL exportado confirma que la regla final cuenta todas (`HAVING COUNT(cc.event_id) >= 2`, línea 208, sin `DISTINCT`).
 - **Dos de los parámetros de ATLAS que no había decidido:** el *Collapse Settings* (`ERA`, `EraPad` 0 por defecto) y la separación entre *persistence window* y *surveillance window*.
 - **Lo que enseña:** revisar el **JSON** de una definición, no solo la pantalla, y comparar la cohorte generada con la propia, persona por persona, es la única forma de saber que «reconstruí lo mismo».
+
+---
+
+## 9. Tres variantes de lavado
+
+Código: [`variantes.sql`](variantes.sql) (crea la tabla temporal `variantes`), [`variantes_caracterizacion.sql`](variantes_caracterizacion.sql) y [`tabla_variantes.py`](tabla_variantes.py), que los ejecuta, comprueba las cifras y genera [`variantes_tablas.md`](variantes_tablas.md). No se escribe nada persistente en la base.
+
+### Qué es cada variante
+
+La **definición principal sigue siendo la declarada en el paso 0** (lavado de 365 días, inicio de estudio 2017); las variantes son sensibilidad y no la reemplazan. «Lavado de *W* días» (decisión 19) significa **observación previa de *W* días y lavado de *W* días juntos**: la base observaba a la persona *W* días antes y no había exposición activa en esos *W* días, y el índice es la **primera receta desde 2017 que cumple las dos** (puede moverse con *W*, a diferencia de la primera receta de toda la historia). El resto de la definición no cambia, y las ventanas de los criterios clínicos se quedan en 365 días: solo se mueve el lavado. Se añade como cuarta fila, aparte de las tres variantes, la cohorte **sin inicio de estudio** (1711/1712 del lab 17), la decisión que se sospechaba más pesada.
+
+**Control:** la variante de 365 días **reproduce `results.cohort` 1701 y 1702 persona por persona**, con la misma fecha índice y la misma fecha de salida (122 y 81).
+
+### Los tres N
+
+| | 180 días | 365 días (principal) | 730 días | sin inicio de estudio |
+|---|---:|---:|---:|---:|
+| **Lisinopril (1701)** | 122 | **122** | 121 | 242 |
+| **Amlodipino (1702)** | 81 | **81** | 81 | 131 |
+
+### Caracterización (lisinopril, 1701)
+
+| variante | N | edad (años) | mujeres | seguimiento (días) | tres comorbilidades más frecuentes |
+|---|---:|---|---:|---|---|
+| lavado 180 d | 122 | 40 [25–55] | 71 (58.2 %) | 927.5 [30–1,869] | hipertensión esencial 117 (96 %); gingivitis 33 (27 %); faringitis viral aguda 14 (11 %) |
+| **lavado 365 d** | **122** | 40 [25–55] | 71 (58.2 %) | 927.5 [30–1,869] | las mismas |
+| lavado 730 d | 121 | 40 [26–55] | 70 (57.9 %) | **742.0** [30–1,869] | las mismas (116, 33, 14) |
+| sin inicio de estudio | 242 | **50** [37–60] | 130 (53.7 %) | **2,628.5** [90–3,609] | hipertensión esencial 128 (**53 %**); gingivitis 41 (17 %); caries dental 21 (9 %) |
+
+Amlodipino (1702) en [`variantes_tablas.md`](variantes_tablas.md): las tres variantes de lavado dan la misma cohorte de 81 personas y la misma caracterización (44 años de mediana, 58 % mujeres, 401 días de seguimiento mediano).
+
+### Lectura
+
+1. **La cohorte es insensible al lavado.** 180 y 365 días son **la misma cohorte** (mismas personas, mismas fechas índice y de salida); 730 días quita a **una persona** (la 4993, con 436 días de observación antes de su índice: cumple 365 pero no 730; su periodo empieza en 2017-08-08, cuando la base apenas empezaba a registrar con detalle). Con el índice en la primera receta, las recetas que duran años y el inicio de estudio en 2017, casi nadie vuelve a entrar tras un hueco largo y casi nadie queda fuera por tener poca observación.
+2. **Con una sola persona de diferencia, el seguimiento mediano cambia 185 días** (927.5 → 742 días; 2.5 → 2.0 años). La mediana de 122 personas es el promedio de las dos centrales: quitar a alguien de la mitad inferior la corre dos posiciones. Es una señal de lo frágil que es una mediana con ~120 personas, y de que no hay que interpretar como un efecto la diferencia entre 927.5 y 742 días.
+3. **Lo que sí cambia la cohorte es el inicio de estudio, no el lavado.** Sin él la cohorte es el doble de grande (242 contra 122), 10 años mayor (mediana 50 contra 40), con un seguimiento 2.8 veces más largo (7.2 contra 2.5 años) y con una proporción mucho menor con hipertensión registrada en el año previo (53 % contra 96 %; la hipertensión se registra una sola vez, y en estas personas es más antigua). No son diferencias de ruido: el inicio de estudio cambia **a qué población se describe**, y la cohorte sin inicio incluye los «nuevos usuarios» artificiales del pico de 2016 (sección 5). La decisión que más pesa no es la que el enunciado pide variar.
