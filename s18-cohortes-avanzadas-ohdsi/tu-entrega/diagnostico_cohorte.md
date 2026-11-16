@@ -414,3 +414,23 @@ Amlodipino (1702) en [`variantes_tablas.md`](variantes_tablas.md): las tres vari
 1. **La cohorte es insensible al lavado.** 180 y 365 días son **la misma cohorte** (mismas personas, mismas fechas índice y de salida); 730 días quita a **una persona** (la 4993, con 436 días de observación antes de su índice: cumple 365 pero no 730; su periodo empieza en 2017-08-08, cuando la base apenas empezaba a registrar con detalle). Con el índice en la primera receta, las recetas que duran años y el inicio de estudio en 2017, casi nadie vuelve a entrar tras un hueco largo y casi nadie queda fuera por tener poca observación.
 2. **Con una sola persona de diferencia, el seguimiento mediano cambia 185 días** (927.5 → 742 días; 2.5 → 2.0 años). La mediana de 122 personas es el promedio de las dos centrales: quitar a alguien de la mitad inferior la corre dos posiciones. Es una señal de lo frágil que es una mediana con ~120 personas, y de que no hay que interpretar como un efecto la diferencia entre 927.5 y 742 días.
 3. **Lo que sí cambia la cohorte es el inicio de estudio, no el lavado.** Sin él la cohorte es el doble de grande (242 contra 122), 10 años mayor (mediana 50 contra 40), con un seguimiento 2.8 veces más largo (7.2 contra 2.5 años) y con una proporción mucho menor con hipertensión registrada en el año previo (53 % contra 96 %; la hipertensión se registra una sola vez, y en estas personas es más antigua). No son diferencias de ruido: el inicio de estudio cambia **a qué población se describe**, y la cohorte sin inicio incluye los «nuevos usuarios» artificiales del pico de 2016 (sección 5). La decisión que más pesa no es la que el enunciado pide variar.
+
+
+## 10. Traslape de las variantes
+
+Generado por [`tabla_traslape.py`](tabla_traslape.py) (también [`traslape_tablas.md`](traslape_tablas.md)); figura: [`figura_traslape.png`](figura_traslape.png). Cada persona cuenta una vez, en la región que dice en cuáles cohortes aparece. Se incluye la cohorte sin inicio de estudio como cuarta capa.
+
+![Traslape de las variantes de lavado](figura_traslape.png)
+
+| región (lisinopril, 1701) | personas | amlodipino (1702) |
+|---|---:|---:|
+| en las tres variantes (180, 365 y 730 d) | **121** | **81** |
+| solo en la más laxa y en la principal (180 y 365 d, no 730 d) | 1 | 0 |
+| solo en 180 d (no en 365 d) | 0 | 0 |
+| **unión de las tres variantes** (= la de 180 d) | **122** | **81** |
+| solo sin inicio de estudio (en ninguna de las tres) | 120 | 50 |
+| total de la cohorte sin inicio de estudio | 242 | 131 |
+
+- **¿Cuántos en las tres?** 121 de 122 en lisinopril (99.2 %) y 81 de 81 en amlodipino. **¿Cuántos solo en la más laxa?** Ninguno: el lavado de 180 d no añade a nadie que no esté ya en el de 365 d. La única persona que no está en las tres (la 4993) está en 180 y 365 d, no en 730 d.
+- **Trampa del enunciado (anidamiento): se cumple y está verificado.** El script falla si no se cumple 730 ⊆ 365 ⊆ 180 ⊆ sin inicio, persona por persona, y comprueba además que quien aparece en varias cohortes entra **con la misma fecha índice**. Esto no estaba garantizado por construcción: con la definición (c) el índice es la primera receta que cumple observación y lavado de *W* días, y podría haberse movido con *W*. Aquí no se mueve para nadie. Si hubiera fallado, habría sido señal de un error de implementación.
+- **Lectura:** el traslape casi total confirma la sección 9: las tres variantes no son tres poblaciones, son **una** población (con una persona de diferencia). El único traslape que no es casi total es con la cohorte sin inicio de estudio: la cohorte principal es la **mitad** de ella (122 de 242; 81 de 131).
