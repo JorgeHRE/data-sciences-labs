@@ -57,3 +57,9 @@ s19-aws-fundamentos-aim/GUIA_ESTUDIO.pdf
 # Instrucciones del lab 20 (solo referencia local) y guía de estudio local
 s20-aws-s3-boto3/ENUNCIADO.md
 s20-aws-s3-boto3/GUIA_ESTUDIO.md
+
+# Lab 20: datos locales generados y cachés
+.pytest_cache/
+s20-aws-s3-boto3/tu-entrega/datos/
+s20-aws-s3-boto3/tu-entrega/*.parquet
+s20-aws-s3-boto3/tu-entrega/*.csv
