@@ -33,10 +33,9 @@
 | Sitios | 1 026 `ORGANIZATION` distintas en `encounters` | comprobado |
 | No disponibles localmente | `recursos/s20-aws-s3-boto3.md` y `tools/figuras_s20.py` (citados por el enunciado) | comprobado |
 
-> **Conflicto a resolver en D1:** la versión anterior de `AGENTS.md` prohibía
-> "datos sintéticos de hospital", y el enunciado pide subir "los datos
-> sintéticos del curso" (Synthea). `AGENTS.md` ya remite la regla a D1; Synthea
-> es 100 % sintético, pero el usuario debe confirmarlo al decidir D1.
+> **Conflicto resuelto en D1:** el usuario confirmó que Synthea (100 %
+> sintético) es el dato permitido del lab y se trata como dato privado a
+> proteger.
 
 ---
 
@@ -77,15 +76,15 @@ generados), `.ipynb_checkpoints/`, `__pycache__/`, `.pytest_cache/`, `~/.aws/`.
 
 | ID | Tema | Paso | Recomendación del Arquitecto | Estado |
 |---|---|---|---|---|
-| D1 | Qué datos subir a `raw/` | 3 | Synthea, subconjunto sin `claims*` ni `imaging_studies` | Pendiente |
-| D2 | Crear el bucket por consola o por CLI | 1 | CLI con comandos documentados + captura de consola | Pendiente |
-| D3 | Tabla y esquema de particionado | 2, 6 | `observations`, particionado por `anio=` | Pendiente |
-| D4 | Contrato de errores de `s3util` | 4 | Excepciones propias; `existe` devuelve `bool` | Pendiente |
-| D5 | Manejo de sesión/cliente | 4 | `perfil` como argumento + cliente cacheado | Pendiente |
-| D6 | Estrategia de pruebas | 4, 5 | moto para unitarias + marcador `integracion` | Pendiente |
-| D7 | Prefijo y limpieza de los > 1 000 objetos | 5 | `tmp/paginacion/` + regla que expira versiones | Pendiente |
-| D8 | Reglas de ciclo de vida | 9 | 3 reglas: multipart, `tmp/` y versiones no actuales | Pendiente |
-| D9 | Bono: política de bucket solo-HTTPS | 11 | Sí, al final | Pendiente |
+| D1 | Qué datos subir a `raw/` | 3 | Synthea, subconjunto sin `claims*` ni `imaging_studies` | **Decidido: B** |
+| D2 | Crear el bucket por consola o por CLI | 1 | CLI con comandos documentados + captura de consola | **Decidido: B** |
+| D3 | Tabla y esquema de particionado | 2, 6 | `observations`, particionado por `anio=` | **Decidido: `observations` + `anio=`** |
+| D4 | Contrato de errores de `s3util` | 4 | Excepciones propias; `existe` devuelve `bool` | **Decidido: A** |
+| D5 | Manejo de sesión/cliente | 4 | `perfil` como argumento + cliente cacheado | **Decidido: B** |
+| D6 | Estrategia de pruebas | 4, 5 | moto para unitarias + marcador `integracion` | **Decidido: D** |
+| D7 | Prefijo y limpieza de los > 1 000 objetos | 5 | `tmp/paginacion/` + regla que expira versiones | **Decidido: A** |
+| D8 | Reglas de ciclo de vida | 9 | 3 reglas: multipart, `tmp/` y versiones no actuales | **Decidido: R1+R2+R3 (sin `raw/`), R4 documentada** |
+| D9 | Bono: política de bucket solo-HTTPS | 11 | Sí, al final | **Decidido: sí, al final** |
 
 El detalle de cada una está en su paso. **Ninguna se implementa sin la elección
 del usuario.** Al decidirse, el Arquitecto actualiza la columna *Estado* y el
@@ -122,7 +121,13 @@ encabezado del paso (`[DECIDIDO: …]`); el porqué largo va en
   <ID> --profile tesis` → las 4 banderas en `true`. El Account ID se usa solo en
   la terminal; en la documentación va `<ACCOUNT_ID>`.
 
-**[DECISIÓN PENDIENTE D2] — Cómo crear el bucket**
+**[DECIDIDO: B] D2 — Cómo crear el bucket** (2026-11-16)
+
+> CLI: los 5 comandos `s3api` seguidos, documentados en `arquitectura_datalake.md`,
+> y captura de consola solo como evidencia visual. Bucket: **`omop-tesis-jhr-2026`**
+> (`us-east-2`). Si responde `BucketAlreadyExists`, proponer una variante (p. ej.
+> `omop-tesis-jhr-2027`) y actualizar este archivo. `put-bucket-encryption` se corre
+> explícito aunque SSE-S3 venga por defecto. Porqué: `tu-entrega/DECISIONES.md`.
 
 | Opción | Ventajas | Desventajas |
 |---|---|---|
@@ -132,8 +137,7 @@ encabezado del paso (`[DECIDIDO: …]`); el porqué largo va en
 
 *Recomendación:* **B**, ejecutando los 5 comandos seguidos para que versionado
 y cifrado estén activos "desde la creación", y luego una captura de la consola
-(pestaña *Properties* y *Permissions*) como evidencia. Nombre:
-`omop-tesis-<iniciales>-<4 dígitos>` (lo elige el usuario).
+(pestaña *Properties* y *Permissions*) como evidencia.
 
 **Verificación (comandos de solo lectura, sus salidas van a
 `arquitectura_datalake.md` o a `operaciones.md`):**
@@ -163,7 +167,14 @@ tmp/...                       (efímero, se expira por ciclo de vida)
 `fecha_carga=` en `raw/` permite cargas sucesivas sin reescribir nada
 (inmutabilidad) y saber qué llegó cuándo (*lineage*).
 
-**[DECISIÓN PENDIENTE D3] — Tabla a convertir y esquema de particionado**
+**[DECIDIDO: `observations` particionada por `anio=`] D3 — Tabla a convertir y esquema de particionado** (2026-11-16)
+
+> El usuario filtrará sobre todo por fecha (ventanas de cohorte). Tabla: `observations`, el CSV
+> más grande que queda en `raw/` tras D1 (`claims_transactions` se excluyó). Partición única
+> `anio=YYYY` derivada de `DATE` en UTC → `curated/synthea/observations/anio=YYYY/`.
+> En `arquitectura_datalake.md` explicar por qué no por mes, categoría ni sitio. Porqué:
+> `tu-entrega/DECISIONES.md`.
+
 (se decide aquí porque el documento lo necesita; se implementa en el paso 6)
 
 *Tabla* — el enunciado dice "el CSV más grande que tengas":
@@ -178,8 +189,8 @@ tmp/...                       (efímero, se expira por ciclo de vida)
 
 | Opción | Particiones | Ventajas | Desventajas |
 |---|---|---|---|
-| `anio=` | ~12 (2015–2026) | ~40–80 MB de Parquet por año (tamaño sano); coincide con filtros de ventana temporal típicos de cohortes | Filtrar un mes lee el año entero (row groups ayudan) |
-| `anio=/mes=` | ~140 | Filtros mensuales más finos | Archivos de ~3–6 MB (*small files*); más GET |
+| `anio=` | ~12 (2015–2026) | ~10–15 MB de Parquet por año (estimado, se mide en el paso 7; el menor tamaño razonable sin caer en *small files*); coincide con filtros de ventana temporal típicos de cohortes | Filtrar un mes lee el año entero (row groups ayudan) |
+| `anio=/mes=` | ~140 | Filtros mensuales más finos | Archivos de ~1 MB (*small files*); más GET |
 | `anio=/CATEGORY=` | ~12 × 8 | Útil si casi siempre se filtra `laboratory` vs. `vital-signs` | Cardinalidad desigual; acopla el layout a una pregunta |
 | Por sitio (`ORGANIZATION`) | ~1 000 | Útil para estudios multicéntricos por hospital | `observations` no tiene la organización (requiere JOIN con `encounters`); 1 000 archivos diminutos |
 
@@ -190,7 +201,14 @@ filtrar en su proyecto final antes de cerrar esta decisión.
 
 ### Paso 3 — Subir con `sync` (Act. 3) → sección en `operaciones.md`
 
-**[DECISIÓN PENDIENTE D1] — Qué subir a `raw/`**
+**[DECIDIDO: B] D1 — Qué subir a `raw/`** (2026-11-16)
+
+> Synthea confirmado como dato permitido; se trata como si fuera sensible (contiene PII simulada).
+> Proyecto final clínico → se suben las 15 tablas clínicas (1.41 GiB) con
+> `--exclude` de `claims.csv`, `claims_transactions.csv` e `imaging_studies.csv`;
+> la exclusión se documenta en `arquitectura_datalake.md`. Porqué: `tu-entrega/DECISIONES.md`.
+> Consecuencia para el paso 2: la minimización por columnas (quitar identificadores de
+> `patients`) se aplica en `staging/`/`curated/`, nunca en `raw/`.
 
 | Opción | Tamaño | Ventajas | Desventajas / costo |
 |---|---|---|---|
@@ -215,7 +233,12 @@ Entregable: las dos salidas (la segunda vacía) y una frase sobre por qué
 Funciones mínimas: `subir`, `descargar`, `listar`, `existe`. Todas reciben
 `perfil` (nombre) y `bucket`; nunca llaves.
 
-**[DECISIÓN PENDIENTE D5] — Sesión y cliente**
+**[DECIDIDO: B] D5 — Sesión y cliente** (2026-11-16)
+
+> Todas las funciones reciben `perfil: str | None`; un helper privado `_cliente(perfil)` con
+> `functools.lru_cache` crea `boto3.Session(profile_name=perfil).client("s3")`. `perfil=None` →
+> *credential chain* (roles en sesiones 21-25). Las pruebas llaman `_cliente.cache_clear()`.
+
 
 | Opción | Ventajas | Desventajas |
 |---|---|---|
@@ -226,7 +249,14 @@ Funciones mínimas: `subir`, `descargar`, `listar`, `existe`. Todas reciben
 *Recomendación:* **B**. Aceptar `perfil=None` para usar la *credential chain*
 (útil cuando el código corra en un rol de AWS en sesiones futuras).
 
-**[DECISIÓN PENDIENTE D4] — Contrato de errores**
+**[DECIDIDO: A] D4 — Contrato de errores** (2026-11-16)
+
+> Jerarquía: `S3UtilError` → `LlaveNoExiste` (NoSuchKey/404), `BucketNoExiste` (NoSuchBucket),
+> `AccesoDenegado` (AccessDenied/403; mensaje con acción probable, ARN y sugerencia del simulador),
+> `PerfilInvalido` (ProfileNotFound/NoCredentialsError). Siempre `raise ... from e`. `existe()`:
+> 404 → `False`, 403 → `AccesoDenegado` (nunca `False`). Otros códigos se relanzan como
+> `S3UtilError` con el código original. `logging`, no `print`.
+
 
 | Opción | Ventajas | Desventajas |
 |---|---|---|
@@ -246,7 +276,15 @@ Ojo técnico (para la implementación): `head_object` devuelve código `"404"`/
 que lanzan (`download_file` usa `head_object` por dentro). Las pruebas deben
 cubrir ambos caminos.
 
-**[DECISIÓN PENDIENTE D6] — Estrategia de pruebas**
+**[DECIDIDO: D] D6 — Estrategia de pruebas** (2026-11-16)
+
+> Unitarias con moto (incluida la de 1 500 objetos y la prueba de control `IsTruncated=True`);
+> Stubber **solo** para `AccessDenied` (moto no aplica IAM por defecto). 4-5 pruebas de
+> integración con `@pytest.mark.integracion`, excluidas por defecto (`addopts = -m "not integracion"`),
+> que escriben solo en `tmp/pruebas/` y limpian al final. **La subida de > 1 000 objetos nunca va
+> en integración**: contra AWS real es el script `demo_paginacion.py`, una sola vez.
+> `conftest.py` fija credenciales falsas para las unitarias.
+
 
 | Opción | Ventajas | Desventajas |
 |---|---|---|
@@ -280,7 +318,12 @@ tras `sts get-caller-identity`.
   `aws s3 ls --recursive | wc -l`. Guardar la salida en `operaciones.md` o en
   el README.
 
-**[DECISIÓN PENDIENTE D7] — Dónde y cómo limpiar los objetos de prueba**
+**[DECIDIDO: A] D7 — Dónde y cómo limpiar los objetos de prueba** (2026-11-16)
+
+> Objetos en `tmp/paginacion/`; borrado con `delete_objects` en lotes de 1 000 (sin `VersionId`:
+> nada de borrado permanente por código); la regla R2 de D8 expira versiones y delete markers.
+> Evidencia: `list-object-versions --prefix tmp/` vacío ≥ 1-2 días después (§6).
+
 
 | Opción | Ventajas | Desventajas |
 |---|---|---|
@@ -336,7 +379,17 @@ URLs firmadas vigentes.
 
 ### Paso 9 — Ciclo de vida y presigned URL (Act. 9) → `operaciones.md`
 
-**[DECISIÓN PENDIENTE D8] — Reglas de ciclo de vida**
+**[DECIDIDO: R1 + R2 + R3 sin `raw/`; R4 solo documentada] D8 — Reglas de ciclo de vida** (2026-11-16)
+
+> - R1: `AbortIncompleteMultipartUpload` 7 días, filtro vacío (todo el bucket).
+> - R2: prefijo `tmp/`: expirar actuales a 1 día y no actuales a 1 día; delete markers huérfanos
+>   eliminados (ojo: `ExpiredObjectDeleteMarker` no se combina con `Days` en el mismo `Expiration`;
+>   verificar en la documentación de AWS y, si hace falta, usar una regla aparte).
+> - R3: `NoncurrentVersionExpiration` 30 días **solo** en `staging/` y `curated/` (un filtro admite un
+>   prefijo → dos reglas). `raw/` conserva sus versiones no actuales: son el dato original.
+> - R4 (`raw/` → Standard-IA a 30 días): analizada en `operaciones.md`, **no aplicada**.
+> Todas en un solo JSON (`put-bucket-lifecycle-configuration` reemplaza el conjunto completo).
+
 
 | Regla candidata | Para qué | Costo/trampa |
 |---|---|---|
@@ -376,11 +429,12 @@ Mencionar que en producción regulada se añadiría Object Lock / MFA Delete.
 
 ### Paso 11 — Bono opcional (D9)
 
-**[DECISIÓN PENDIENTE D9]** — ¿Hacer la política de bucket que niega todo lo
+**[DECIDIDO: sí, en el paso 11] D9** (2026-11-16) — Hacer la política de bucket que niega todo lo
 que no venga por HTTPS (`Condition: {"Bool": {"aws:SecureTransport":
 "false"}}`, `Effect: Deny`, `Principal: "*"`, ARN de bucket **y** de objetos)?
-*Recomendación:* sí (≈ 15 líneas, sin costo, muy relevante en pharma), y volver a
-correr `pytest -m integracion`. Recordar: es un **Explicit Deny**, gana a
+Se hace al final, con todo lo demás funcionando; después, `pytest -m integracion` en verde y,
+como prueba negativa, una petición con `--endpoint-url http://...` → `AccessDenied`. Explicar que
+`s3:*`/`Principal: "*"` en un **Deny** no viola privilegio mínimo (quita permisos, no los da). Recordar: es un **Explicit Deny**, gana a
 cualquier Allow; si se escribe mal puede bloquear al propio usuario (se
 corrige con `delete-bucket-policy`). Los otros bonos (Registry of Open Data,
 snappy vs. zstd) se ofrecen solo si sobra tiempo.

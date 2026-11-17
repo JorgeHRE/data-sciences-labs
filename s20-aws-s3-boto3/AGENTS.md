@@ -103,8 +103,8 @@ Antes de escribir la primera línea de código o tocar cualquier recurso:
 
 ### Seguridad y costos (reglas no negociables)
 - **Cero datos reales:** nunca uses ni subas datos de pacientes reales. Los
-  datos sintéticos del curso (Synthea) se usan solo según lo decidido en D1 de
-  `SPECS.md`; para pruebas, demos y objetos efímeros usa archivos de texto
+  datos sintéticos del curso (Synthea) están permitidos (D1 de `SPECS.md`) y se
+  tratan como datos privados: bucket privado, cifrado, nada público; para pruebas, demos y objetos efímeros usa archivos de texto
   inventados.
 - **Cero credenciales en el repo:** jamás incluyas Access Keys, Secret Keys,
   Account IDs reales, UserIds o archivos de `~/.aws/` ni en el código, ni en
