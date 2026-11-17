@@ -158,7 +158,7 @@ tmp/<proposito>/<archivo>
 
 - **Tabla convertida:** `observations` (`observations.csv`, 974 MB, ~5.7 M filas, columnas `DATE,PATIENT,ENCOUNTER,CATEGORY,CODE,DESCRIPTION,VALUE,UNITS,TYPE`). Es la tabla clínica más grande que ingresa a `raw/` (tras excluir `claims_transactions`) y la fuente principal de mediciones/signos vitales y laboratorios.
 - **Partición elegida:** `anio=YYYY` derivada de la columna `DATE` (ISO 8601 en UTC), ubicada en `curated/synthea/observations/anio=YYYY/`.
-- **Por qué coincide con los filtros de las sesiones 21–25:** las consultas analíticas de cohortes OMOP filtran casi siempre por **ventanas temporales** (periodos de inclusión, *washout* previo a la exposición y ventanas de seguimiento). Con ~12 años de datos principales en `observations` (2015–2026), se generan ~12 particiones de tamaño equilibrado (del orden de ~10–15 MB cada una en Parquet, que se medirá exactamente en el Paso 7), evitando el problema de *small files* y reduciendo las peticiones `GET` en S3. Para filtros por `CODE` (LOINC) o `CATEGORY`, las estadísticas min/max de los *row groups* de Parquet permiten *predicate pushdown* sin añadir más carpetas.
+- **Por qué coincide con los filtros de las sesiones 21–25:** las consultas analíticas de cohortes OMOP filtran casi siempre por **ventanas temporales** (periodos de inclusión, *washout* previo a la exposición y ventanas de seguimiento). En el conjunto sintético (`1917–2026`, **110 particiones anuales** en total), el grueso clínico reciente (`2016–2026`, 11 particiones) concentra ~87.6 MiB (~68 % del volumen) en archivos equilibrados de **4.8 a 8.6 MiB** por año, mientras que los antecedentes históricos (`1917–2015`, 99 particiones) generan una cola de archivos pequeños (`3.4 KiB` a `1.8 MiB`, 81 de ellos `< 1 MiB`). Esta distribución demuestra en la práctica tanto el costo del *small files problem* al escanear las 110 carpetas sin filtro por HTTP (`24.686 s` en DuckDB sobre S3) como la eficacia de la poda de particiones (`WHERE anio = 2025`: `0.144 s`, `1/110` archivos y `#GET: 1`). Para filtros adicionales por `CODE` (LOINC) o `CATEGORY`, las estadísticas min/max de los *row groups* de Parquet permiten *predicate pushdown* sin subdividir aún más las carpetas.
 
 ### Por qué NO particioné por X
 
@@ -169,6 +169,127 @@ tmp/<proposito>/<archivo>
 
 ---
 
-## 5. Estructura resultante en `curated/` y conteo (Paso 6)
+## 5. Estructura resultante en `curated/` y conteo (Actividad 6)
 
-*(Se completará tras ejecutar `scripts/convertir_parquet.py` en el Paso 6 con la salida real de `aws s3 ls --recursive` y el conteo CSV vs. Parquet).*
+Conversión ejecutada con [scripts/convertir_parquet.py](./scripts/convertir_parquet.py) (`DATE` como `timestamp("s", tz="UTC")`, `VALUE` como `string`, compresión `snappy`, formato Hive `anio=YYYY`):
+
+- **Conteo de filas (`observations.csv` vs. Parquet):** `5,719,327` filas leídas del CSV (5,719,328 líneas menos 1 encabezado) == **`5,719,327`** filas en el dataset Parquet.
+- **Reducción de tamaño en S3:** `973.6 MiB` (CSV en `raw/`) → **`128.3 MiB`** (Parquet Snappy particionado en `curated/`), distribuidos en **110 particiones anuales** (`anio=1917` a `anio=2026`): 11 particiones recientes (`2016–2026`, `4.8–8.6 MiB`) y 99 particiones históricas (`1917–2015`, `3.4 KiB–1.8 MiB`).
+
+```text
+$ aws s3 ls s3://omop-tesis-jhr-2026/curated/synthea/observations/ \
+  --recursive --summarize --human-readable --profile tesis
+2026-11-17 08:46:41    4.1 KiB curated/synthea/observations/anio=1917/part-0.parquet
+2026-11-17 08:46:41   12.2 KiB curated/synthea/observations/anio=1918/part-0.parquet
+2026-11-17 08:46:41   18.0 KiB curated/synthea/observations/anio=1919/part-0.parquet
+2026-11-17 08:46:41   35.4 KiB curated/synthea/observations/anio=1920/part-0.parquet
+2026-11-17 08:46:41   38.9 KiB curated/synthea/observations/anio=1921/part-0.parquet
+2026-11-17 08:46:41   33.6 KiB curated/synthea/observations/anio=1922/part-0.parquet
+2026-11-17 08:46:41   27.6 KiB curated/synthea/observations/anio=1923/part-0.parquet
+2026-11-17 08:46:41   31.3 KiB curated/synthea/observations/anio=1924/part-0.parquet
+2026-11-17 08:46:41   27.4 KiB curated/synthea/observations/anio=1925/part-0.parquet
+2026-11-17 08:46:41    8.3 KiB curated/synthea/observations/anio=1926/part-0.parquet
+2026-11-17 08:46:41    3.9 KiB curated/synthea/observations/anio=1927/part-0.parquet
+2026-11-17 08:46:41    6.9 KiB curated/synthea/observations/anio=1928/part-0.parquet
+2026-11-17 08:46:41    3.8 KiB curated/synthea/observations/anio=1929/part-0.parquet
+2026-11-17 08:46:41    3.7 KiB curated/synthea/observations/anio=1930/part-0.parquet
+2026-11-17 08:46:41    3.8 KiB curated/synthea/observations/anio=1931/part-0.parquet
+2026-11-17 08:46:41    6.1 KiB curated/synthea/observations/anio=1932/part-0.parquet
+2026-11-17 08:46:41    5.8 KiB curated/synthea/observations/anio=1933/part-0.parquet
+2026-11-17 08:46:41    6.6 KiB curated/synthea/observations/anio=1934/part-0.parquet
+2026-11-17 08:46:41    5.8 KiB curated/synthea/observations/anio=1935/part-0.parquet
+2026-11-17 08:46:41    5.7 KiB curated/synthea/observations/anio=1936/part-0.parquet
+2026-11-17 08:46:41    5.7 KiB curated/synthea/observations/anio=1937/part-0.parquet
+2026-11-17 08:46:41    5.3 KiB curated/synthea/observations/anio=1938/part-0.parquet
+2026-11-17 08:46:41    8.2 KiB curated/synthea/observations/anio=1939/part-0.parquet
+2026-11-17 08:46:41    3.4 KiB curated/synthea/observations/anio=1940/part-0.parquet
+2026-11-17 08:46:41    3.6 KiB curated/synthea/observations/anio=1941/part-0.parquet
+2026-11-17 08:46:41    5.4 KiB curated/synthea/observations/anio=1942/part-0.parquet
+2026-11-17 08:46:41    7.4 KiB curated/synthea/observations/anio=1943/part-0.parquet
+2026-11-17 08:46:41    7.4 KiB curated/synthea/observations/anio=1944/part-0.parquet
+2026-11-17 08:46:41   11.7 KiB curated/synthea/observations/anio=1945/part-0.parquet
+2026-11-17 08:46:41   15.0 KiB curated/synthea/observations/anio=1946/part-0.parquet
+2026-11-17 08:46:41   21.0 KiB curated/synthea/observations/anio=1947/part-0.parquet
+2026-11-17 08:46:41   34.3 KiB curated/synthea/observations/anio=1948/part-0.parquet
+2026-11-17 08:46:41   59.4 KiB curated/synthea/observations/anio=1949/part-0.parquet
+2026-11-17 08:46:41   73.0 KiB curated/synthea/observations/anio=1950/part-0.parquet
+2026-11-17 08:46:41   69.0 KiB curated/synthea/observations/anio=1951/part-0.parquet
+2026-11-17 08:46:41   66.7 KiB curated/synthea/observations/anio=1952/part-0.parquet
+2026-11-17 08:46:41   59.0 KiB curated/synthea/observations/anio=1953/part-0.parquet
+2026-11-17 08:46:41   48.3 KiB curated/synthea/observations/anio=1954/part-0.parquet
+2026-11-17 08:46:41   58.7 KiB curated/synthea/observations/anio=1955/part-0.parquet
+2026-11-17 08:46:41   78.9 KiB curated/synthea/observations/anio=1956/part-0.parquet
+2026-11-17 08:46:41   78.3 KiB curated/synthea/observations/anio=1957/part-0.parquet
+2026-11-17 08:46:41   88.5 KiB curated/synthea/observations/anio=1958/part-0.parquet
+2026-11-17 08:46:41  109.8 KiB curated/synthea/observations/anio=1959/part-0.parquet
+2026-11-17 08:46:41   84.4 KiB curated/synthea/observations/anio=1960/part-0.parquet
+2026-11-17 08:46:41  100.2 KiB curated/synthea/observations/anio=1961/part-0.parquet
+2026-11-17 08:46:41  121.9 KiB curated/synthea/observations/anio=1962/part-0.parquet
+2026-11-17 08:46:41  131.2 KiB curated/synthea/observations/anio=1963/part-0.parquet
+2026-11-17 08:46:41  131.3 KiB curated/synthea/observations/anio=1964/part-0.parquet
+2026-11-17 08:46:41  134.0 KiB curated/synthea/observations/anio=1965/part-0.parquet
+2026-11-17 08:46:41  111.9 KiB curated/synthea/observations/anio=1966/part-0.parquet
+2026-11-17 08:46:41  121.4 KiB curated/synthea/observations/anio=1967/part-0.parquet
+2026-11-17 08:46:41  146.2 KiB curated/synthea/observations/anio=1968/part-0.parquet
+2026-11-17 08:46:41  129.2 KiB curated/synthea/observations/anio=1969/part-0.parquet
+2026-11-17 08:46:41  131.3 KiB curated/synthea/observations/anio=1970/part-0.parquet
+2026-11-17 08:46:41  145.6 KiB curated/synthea/observations/anio=1971/part-0.parquet
+2026-11-17 08:46:41  199.9 KiB curated/synthea/observations/anio=1972/part-0.parquet
+2026-11-17 08:46:41  211.1 KiB curated/synthea/observations/anio=1973/part-0.parquet
+2026-11-17 08:46:41  248.7 KiB curated/synthea/observations/anio=1974/part-0.parquet
+2026-11-17 08:46:41  262.3 KiB curated/synthea/observations/anio=1975/part-0.parquet
+2026-11-17 08:46:41  307.6 KiB curated/synthea/observations/anio=1976/part-0.parquet
+2026-11-17 08:46:41  385.0 KiB curated/synthea/observations/anio=1977/part-0.parquet
+2026-11-17 08:46:41  349.9 KiB curated/synthea/observations/anio=1978/part-0.parquet
+2026-11-17 08:46:41  382.8 KiB curated/synthea/observations/anio=1979/part-0.parquet
+2026-11-17 08:46:41  425.7 KiB curated/synthea/observations/anio=1980/part-0.parquet
+2026-11-17 08:46:41  435.8 KiB curated/synthea/observations/anio=1981/part-0.parquet
+2026-11-17 08:46:41  419.5 KiB curated/synthea/observations/anio=1982/part-0.parquet
+2026-11-17 08:46:41  516.2 KiB curated/synthea/observations/anio=1983/part-0.parquet
+2026-11-17 08:46:41  542.7 KiB curated/synthea/observations/anio=1984/part-0.parquet
+2026-11-17 08:46:41  486.2 KiB curated/synthea/observations/anio=1985/part-0.parquet
+2026-11-17 08:46:41  461.6 KiB curated/synthea/observations/anio=1986/part-0.parquet
+2026-11-17 08:46:41  432.4 KiB curated/synthea/observations/anio=1987/part-0.parquet
+2026-11-17 08:46:41  482.4 KiB curated/synthea/observations/anio=1988/part-0.parquet
+2026-11-17 08:46:41  492.4 KiB curated/synthea/observations/anio=1989/part-0.parquet
+2026-11-17 08:46:41  534.7 KiB curated/synthea/observations/anio=1990/part-0.parquet
+2026-11-17 08:46:41  631.8 KiB curated/synthea/observations/anio=1991/part-0.parquet
+2026-11-17 08:46:41  657.2 KiB curated/synthea/observations/anio=1992/part-0.parquet
+2026-11-17 08:46:42  722.0 KiB curated/synthea/observations/anio=1993/part-0.parquet
+2026-11-17 08:46:41  789.9 KiB curated/synthea/observations/anio=1994/part-0.parquet
+2026-11-17 08:46:41  789.2 KiB curated/synthea/observations/anio=1995/part-0.parquet
+2026-11-17 08:46:42  869.9 KiB curated/synthea/observations/anio=1996/part-0.parquet
+2026-11-17 08:46:42  931.8 KiB curated/synthea/observations/anio=1997/part-0.parquet
+2026-11-17 08:46:42    1.0 MiB curated/synthea/observations/anio=1998/part-0.parquet
+2026-11-17 08:46:42    1.1 MiB curated/synthea/observations/anio=1999/part-0.parquet
+2026-11-17 08:46:42    1.2 MiB curated/synthea/observations/anio=2000/part-0.parquet
+2026-11-17 08:46:42    1.3 MiB curated/synthea/observations/anio=2001/part-0.parquet
+2026-11-17 08:46:42    1.3 MiB curated/synthea/observations/anio=2002/part-0.parquet
+2026-11-17 08:46:42    1.3 MiB curated/synthea/observations/anio=2003/part-0.parquet
+2026-11-17 08:46:42    1.4 MiB curated/synthea/observations/anio=2004/part-0.parquet
+2026-11-17 08:46:42    1.3 MiB curated/synthea/observations/anio=2005/part-0.parquet
+2026-11-17 08:46:42    1.3 MiB curated/synthea/observations/anio=2006/part-0.parquet
+2026-11-17 08:46:42    1.4 MiB curated/synthea/observations/anio=2007/part-0.parquet
+2026-11-17 08:46:42    1.4 MiB curated/synthea/observations/anio=2008/part-0.parquet
+2026-11-17 08:46:42    1.5 MiB curated/synthea/observations/anio=2009/part-0.parquet
+2026-11-17 08:46:42    1.6 MiB curated/synthea/observations/anio=2010/part-0.parquet
+2026-11-17 08:46:42    1.6 MiB curated/synthea/observations/anio=2011/part-0.parquet
+2026-11-17 08:46:42    1.6 MiB curated/synthea/observations/anio=2012/part-0.parquet
+2026-11-17 08:46:42    1.6 MiB curated/synthea/observations/anio=2013/part-0.parquet
+2026-11-17 08:46:42    1.7 MiB curated/synthea/observations/anio=2014/part-0.parquet
+2026-11-17 08:46:42    1.8 MiB curated/synthea/observations/anio=2015/part-0.parquet
+2026-11-17 08:46:42    4.8 MiB curated/synthea/observations/anio=2016/part-0.parquet
+2026-11-17 08:46:42    8.1 MiB curated/synthea/observations/anio=2017/part-0.parquet
+2026-11-17 08:46:42    8.2 MiB curated/synthea/observations/anio=2018/part-0.parquet
+2026-11-17 08:46:42    8.2 MiB curated/synthea/observations/anio=2019/part-0.parquet
+2026-11-17 08:46:42    8.6 MiB curated/synthea/observations/anio=2020/part-0.parquet
+2026-11-17 08:46:42    8.6 MiB curated/synthea/observations/anio=2021/part-0.parquet
+2026-11-17 08:46:42    8.3 MiB curated/synthea/observations/anio=2022/part-0.parquet
+2026-11-17 08:46:42    8.3 MiB curated/synthea/observations/anio=2023/part-0.parquet
+2026-11-17 08:46:42    8.4 MiB curated/synthea/observations/anio=2024/part-0.parquet
+2026-11-17 08:46:42    8.4 MiB curated/synthea/observations/anio=2025/part-0.parquet
+2026-11-17 08:46:42    7.7 MiB curated/synthea/observations/anio=2026/part-0.parquet
+
+Total Objects: 110
+   Total Size: 128.3 MiB
+```
