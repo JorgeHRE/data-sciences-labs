@@ -1,0 +1,4 @@
+# Lab 19 — entorno para verificación de perfiles AWS y S3 con boto3
+boto3
+jupyter
+ipykernel
