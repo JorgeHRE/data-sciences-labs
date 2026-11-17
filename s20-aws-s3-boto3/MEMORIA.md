@@ -7,4 +7,5 @@
 - Generados `GUIA_ESTUDIO.md` y `SPECS.md`. Revisado el enunciado, los
   entregables del lab 19 y los datos Synthea locales (4.3 GB, sin modificar).
 - 9 decisiones pendientes (D1-D9) marcadas en `SPECS.md` §2; ninguna resuelta.
-- **Siguiente:** el usuario confirma el plan → Fase 2, `SPECS.md` Paso 0.
+- Plan aprobado por el usuario; SPECS, MEMORIA y AGENTS versionados (PR #142).
+- **Siguiente:** Fase 2, `SPECS.md` Paso 0 (el .gitignore de ENUNCIADO/GUIA ya está hecho).
