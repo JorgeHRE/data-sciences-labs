@@ -1,24 +1,36 @@
 ## Protocolo Multimodelo (Enrutamiento por Fase)
 
-Este repositorio opera bajo un flujo dividido en tres roles. Según la fase que te indique en mi prompt, aplica únicamente las reglas correspondientes:
+Este repositorio opera bajo un flujo dividido en tres roles y cuatro fases. Según la fase que te indique en mi prompt, aplica únicamente las reglas correspondientes:
 
 1. **Fase 0 y 1 — Arquitecto (Opus 5.5):**
    - Lee `ENUNCIADO.md` e inspecciona los datos o recursos disponibles (solo esquemas, encabezados o estructura, sin modificar nada).
    - Genera `GUIA_ESTUDIO.md` (conceptos clave + sección final de preguntas de entrevista técnica) y `SPECS.md` (plan de trabajo técnico paso a paso).
    - **Regla estricta:** No escribas código de producción ni tomes por mí las decisiones técnicas no triviales. Déjalas marcadas en `SPECS.md` como `[DECISIÓN PENDIENTE]` junto con sus opciones, ventajas/desventajas (en contexto farmacéutico/regulado) y tu recomendación.
+   - **Discusión de decisiones (antes de la Fase 2):** discute conmigo cada `[DECISIÓN PENDIENTE]` y, cuando yo elija, cámbiala en `SPECS.md` a `[DECIDIDO: <opción>]` con 1-2 líneas del porqué. El Constructor no debe heredar decisiones abiertas.
+   - **Ajuste del protocolo al lab:** adapta a este laboratorio las partes de este archivo que dependen del tema (reglas de datos y lista de errores silenciosos del Auditor en `SPECS.md` §5).
 
 2. **Fase 2 — Constructor y Tutor (Hydrogen o Sonnet):**
    - Lee `SPECS.md` y `MEMORIA.md` antes de comenzar para retomar el estado exacto del proyecto.
-   - Ejecuta la implementación siguiendo el orden de `SPECS.md` y aplicando **todas** las reglas de la sección **MODO INTERMEDIO** de este documento (trozos de 30–50 líneas, pausas en cada `[DECISIÓN PENDIENTE]`, explicaciones del "porqué", verificaciones tras cada paso, registro en `DECISIONES.md` y `MEMORIA.md`, y pregunta de comprensión al cierre de cada sección).
+   - Ejecuta la implementación siguiendo el orden de `SPECS.md` y aplicando **todas** las reglas de la sección **MODO INTERMEDIO** de este documento (trozos de 30–50 líneas, aplicación de las decisiones `[DECIDIDO]` de `SPECS.md`, explicaciones del "porqué", verificaciones tras cada paso, registro en `DECISIONES.md` y `MEMORIA.md`, y pregunta de comprensión al cierre de cada sección).
+   - **Si queda o aparece una decisión no trivial** que `SPECS.md` no resuelve, no la tomes: detente, anótala en `MEMORIA.md` como `[ESCALAR AL ARQUITECTO]` con sus opciones y avísame.
+   - **Evidencia en archivos:** pega en el entregable que indique cada paso de `SPECS.md` la salida real de cada verificación (comandos CLI, conteos, `pytest`, tiempos), censurando Account ID, ARNs con ID y llaves. El Auditor no ve AWS: lo que no está en un archivo no está demostrado.
 
 3. **Fase 3 — Auditor (Argon):**
    - Lee `ENUNCIADO.md`, `SPECS.md`, `DECISIONES.md` y todos los scripts/entregables generados.
    - **Exención de formato:** Ignora el límite de 30–50 líneas, las pausas interactivas y las preguntas de comprensión.
-   - Audita el proyecto completo contra la sección **Verificación (esto no se negocia)** buscando errores silenciosos (duplicación en `JOIN`s, *data leakage*, manejo injustificado de `NULL`s, fallos de privilegio mínimo o exposición de credenciales). Escribe todos los hallazgos y mejoras en `AUDIT.md` sin modificar el código directamente.
+   - Audita el proyecto completo contra la sección **Verificación (esto no se negocia)** y contra la lista de errores silenciosos propia del lab en `SPECS.md` §5 (para este lab: paginación incompleta, `existe()` que confunde 403 con "no existe", excepciones tragadas, pruebas que tocan AWS real, benchmark sin mediana, particionado que no se aprovecha, versiones huérfanas, reglas de ciclo de vida pisadas, privilegio mínimo y exposición de credenciales, incluido el Access Key ID dentro de una presigned URL).
+   - Comprueba que cada afirmación del entregable tenga su evidencia pegada en un archivo; si falta, es un hallazgo.
+   - Escribe en `AUDIT.md` cada hallazgo numerado (`A1`, `A2`, …) con severidad (alta/media/baja), archivo y línea, escenario de falla y corrección sugerida, sin modificar el código directamente.
+
+4. **Fase 4 — Corrección y reauditoría (Constructor, luego Auditor):**
+   - El Constructor lee `AUDIT.md`, me presenta los hallazgos y, con mi visto bueno, corrige cada uno en trozos pequeños con su verificación.
+   - Marca cada hallazgo en `AUDIT.md` como `[CORREGIDO]`, `[OMITIDO: motivo]` o `[SIN CAMBIO: motivo]`; los de severidad alta no se omiten sin mi aprobación explícita.
+   - El Auditor revisa **solo** los hallazgos marcados y añade al final de `AUDIT.md` una sección "Reauditoría" con su veredicto por hallazgo. El lab se cierra cuando no quedan hallazgos altos abiertos.
 
 ## Registro de Memoria y Aislamiento de Archivos
 
 - **Archivo `MEMORIA.md`:** Mantén este archivo actualizado en la raíz del proyecto. Después de cada trozo verificado en la Fase 2, anota en 2–3 líneas: qué paso se completó, el resultado clave obtenido (conteo de filas, métricas o salida de verificación) y cuál es el siguiente punto en `SPECS.md`.
+- **Un dueño por tipo de información (no dupliques):** el plan y las decisiones con su estado viven en `SPECS.md`; el porqué de cada decisión, en `tu-entrega/DECISIONES.md`; el avance y lo siguiente, en `MEMORIA.md`; los hallazgos, en `AUDIT.md`. Los demás archivos enlazan, no copian.
 - **Aislamiento de entregables:** Guarda todos los archivos de control del flujo (`AGENTS.md`, `CLAUDE.md`, `GUIA_ESTUDIO.md`, `SPECS.md`, `MEMORIA.md` y `AUDIT.md`) exclusivamente en la raíz del repositorio. Mantén la carpeta de entrega (p. ej. `tu-entrega/` o `src/`) limpia únicamente con los archivos solicitados en `ENUNCIADO.md` (y `DECISIONES.md` si se requiere como respaldo).
 
 ---
@@ -90,8 +102,10 @@ Antes de escribir la primera línea de código o tocar cualquier recurso:
   **objeto** (`arn:aws:s3:::bucket/*`).
 
 ### Seguridad y costos (reglas no negociables)
-- **Cero datos reales:** nunca uses ni subas datos de pacientes reales ni
-  sintéticos de hospital; usa solo archivos de texto de prueba inventados.
+- **Cero datos reales:** nunca uses ni subas datos de pacientes reales. Los
+  datos sintéticos del curso (Synthea) se usan solo según lo decidido en D1 de
+  `SPECS.md`; para pruebas, demos y objetos efímeros usa archivos de texto
+  inventados.
 - **Cero credenciales en el repo:** jamás incluyas Access Keys, Secret Keys,
   Account IDs reales, UserIds o archivos de `~/.aws/` ni en el código, ni en
   capturas sin censurar, ni en documentos del repositorio. Si te paso por

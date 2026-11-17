@@ -3,10 +3,14 @@
 > **Para el Constructor (Fase 2, Hydrogen o Sonnet).** Lee este archivo y
 > `MEMORIA.md` antes de empezar. Ejecuta los pasos **en orden**, aplicando el
 > MODO INTERMEDIO de `AGENTS.md`: trozos de 30–50 líneas, verificación tras cada
-> trozo, **pausa en cada `[DECISIÓN PENDIENTE]`** (presenta opciones y
-> recomendación, espera la elección del usuario), registro en
-> `tu-entrega/DECISIONES.md` y en `MEMORIA.md`, y una pregunta de comprensión
-> al cerrar cada sección. Todo en español.
+> trozo, registro en `tu-entrega/DECISIONES.md` y en `MEMORIA.md`, y una
+> pregunta de comprensión al cerrar cada sección. Todo en español.
+>
+> Las decisiones D1–D9 se discuten con el Arquitecto **antes** de la Fase 2 y
+> quedan como `[DECIDIDO: …]`. Si alguna sigue como `[DECISIÓN PENDIENTE]`
+> cuando llegues a su paso, **no la tomes**: escálala (`[ESCALAR AL
+> ARQUITECTO]` en `MEMORIA.md`). La evidencia de cada paso va pegada en el
+> archivo que indica §6: el Auditor no ve AWS.
 >
 > El usuario ejecuta los comandos contra AWS; tú escribes código, comandos y
 > documentación.
@@ -29,10 +33,10 @@
 | Sitios | 1 026 `ORGANIZATION` distintas en `encounters` | comprobado |
 | No disponibles localmente | `recursos/s20-aws-s3-boto3.md` y `tools/figuras_s20.py` (citados por el enunciado) | comprobado |
 
-> **Conflicto a resolver en D1:** las reglas de `AGENTS.md` dicen "nunca datos
-> de pacientes reales **ni sintéticos de hospital**", y el enunciado pide subir
-> "los datos sintéticos del curso" (Synthea). Synthea es 100 % sintético, pero
-> el usuario debe confirmarlo explícitamente.
+> **Conflicto a resolver en D1:** la versión anterior de `AGENTS.md` prohibía
+> "datos sintéticos de hospital", y el enunciado pide subir "los datos
+> sintéticos del curso" (Synthea). `AGENTS.md` ya remite la regla a D1; Synthea
+> es 100 % sintético, pero el usuario debe confirmarlo al decidir D1.
 
 ---
 
@@ -71,20 +75,22 @@ generados), `.ipynb_checkpoints/`, `__pycache__/`, `.pytest_cache/`, `~/.aws/`.
 
 ## 2. Decisiones pendientes (resumen)
 
-| ID | Tema | Paso | Recomendación del Arquitecto |
-|---|---|---|---|
-| D1 | Qué datos subir a `raw/` | 3 | Synthea, subconjunto sin `claims*` ni `imaging_studies` |
-| D2 | Crear el bucket por consola o por CLI | 1 | CLI con comandos documentados + captura de consola |
-| D3 | Tabla y esquema de particionado | 2, 6 | `observations`, particionado por `anio=` |
-| D4 | Contrato de errores de `s3util` | 4 | Excepciones propias; `existe` devuelve `bool` |
-| D5 | Manejo de sesión/cliente | 4 | `perfil` como argumento + cliente cacheado |
-| D6 | Estrategia de pruebas | 4, 5 | moto para unitarias + marcador `integracion` |
-| D7 | Prefijo y limpieza de los > 1 000 objetos | 5 | `tmp/paginacion/` + regla que expira versiones |
-| D8 | Reglas de ciclo de vida | 9 | 3 reglas: multipart, `tmp/` y versiones no actuales |
-| D9 | Bono: política de bucket solo-HTTPS | 11 | Sí, al final |
+| ID | Tema | Paso | Recomendación del Arquitecto | Estado |
+|---|---|---|---|---|
+| D1 | Qué datos subir a `raw/` | 3 | Synthea, subconjunto sin `claims*` ni `imaging_studies` | Pendiente |
+| D2 | Crear el bucket por consola o por CLI | 1 | CLI con comandos documentados + captura de consola | Pendiente |
+| D3 | Tabla y esquema de particionado | 2, 6 | `observations`, particionado por `anio=` | Pendiente |
+| D4 | Contrato de errores de `s3util` | 4 | Excepciones propias; `existe` devuelve `bool` | Pendiente |
+| D5 | Manejo de sesión/cliente | 4 | `perfil` como argumento + cliente cacheado | Pendiente |
+| D6 | Estrategia de pruebas | 4, 5 | moto para unitarias + marcador `integracion` | Pendiente |
+| D7 | Prefijo y limpieza de los > 1 000 objetos | 5 | `tmp/paginacion/` + regla que expira versiones | Pendiente |
+| D8 | Reglas de ciclo de vida | 9 | 3 reglas: multipart, `tmp/` y versiones no actuales | Pendiente |
+| D9 | Bono: política de bucket solo-HTTPS | 11 | Sí, al final | Pendiente |
 
 El detalle de cada una está en su paso. **Ninguna se implementa sin la elección
-del usuario.**
+del usuario.** Al decidirse, el Arquitecto actualiza la columna *Estado* y el
+encabezado del paso (`[DECIDIDO: …]`); el porqué largo va en
+`tu-entrega/DECISIONES.md`, no aquí.
 
 ---
 
@@ -413,7 +419,7 @@ snappy vs. zstd) se ofrecen solo si sobra tiempo.
 | `gitleaks` limpio | Paso 12 |
 | Commits descriptivos | Ramas `s20/*`, Conventional Commits |
 
-## 5. Riesgos que el Auditor revisará
+## 5. Errores silenciosos que el Auditor revisará (lista propia de este lab)
 
 - `listar` sin paginador o que pierde la última página.
 - `existe()` que confunde 403 con "no existe".
@@ -424,3 +430,22 @@ snappy vs. zstd) se ofrecen solo si sobra tiempo.
 - Account ID, Access Key ID (en presigned URLs) o ARNs completos en el repo.
 - Objetos de prueba borrados pero con versiones vivas.
 - `put-bucket-lifecycle-configuration` que pisó reglas previas.
+
+## 6. Evidencia que debe quedar pegada en archivos
+
+Cada fila es obligatoria. Censura Account ID (`<ACCOUNT_ID>`), ARNs con ID y
+llaves antes de pegar. Pega la **salida real**, no un resumen.
+
+| Paso | Evidencia | Archivo |
+|---|---|---|
+| 1 | `sts get-caller-identity` censurado (se ve `:user/`, no `:root`); BPA de cuenta y de bucket; `get-bucket-versioning`, `get-bucket-encryption`, `get-bucket-tagging`; `curl -I` → `403`; captura de consola | `arquitectura_datalake.md` (sección "Configuración del bucket") + `capturas/` |
+| 3 | Salida de `sync --dryrun`, de la primera corrida y de la segunda (vacía); `aws s3 ls --summarize` de `raw/` | `operaciones.md` |
+| 4–5 | Salida de `pytest -v` (unitarias) y de `pytest -m integracion -v` | `README.md` |
+| 5 | Salida de `demo_paginacion.py` (N subidos, N listados) y de `aws s3 ls --recursive \| wc -l`; luego `list-object-versions --prefix tmp/` vacío tras la limpieza | `operaciones.md` |
+| 6 | Árbol de `curated/` (`aws s3 ls --recursive`) y conteo de filas CSV vs. Parquet | `arquitectura_datalake.md` |
+| 7 | Tabla de medianas generada por código, equipo y versiones, gráfica | `benchmark.ipynb` (salidas guardadas) |
+| 8 | Tiempos con y sin filtro de partición y `EXPLAIN ANALYZE` | `benchmark.ipynb` |
+| 9 | JSON de ciclo de vida aplicado y `get-bucket-lifecycle-configuration`; `curl` 200 con URL vigente y 403 `Request has expired` con URL caducada (con `X-Amz-Credential` censurado) | `operaciones.md` |
+| 10 | Las 6 salidas de la secuencia de borrado y recuperación, con los `VersionId` | `operaciones.md` |
+| 11 | Política solo-HTTPS aplicada y `pytest -m integracion` pasando después | `operaciones.md` |
+| 12 | Salida de `gitleaks` (repo + historial) y captura de Cost Explorer filtrada por `Proyecto=tesis` | `README.md` + `capturas/` |
