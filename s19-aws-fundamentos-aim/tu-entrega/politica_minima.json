@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PermitirLecturaSoloPrefijoPublico",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::lab19-jorge-prueba-20261116/publico/*"
+    }
+  ]
+}
