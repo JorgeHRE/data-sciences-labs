@@ -10,10 +10,10 @@
 
 | Severidad | Cantidad | IDs | Estado |
 |---|---:|---|---|
-| **Alta** | 1 | `A1` | `[CORREGIDO]` |
-| **Media** | 3 | `A2`, `A3`, `A4` | `[CORREGIDO]` |
-| **Baja** | 2 | `A5`, `A6` | `[CORREGIDO]` |
-| **Total** | **6** | `A1`–`A6` | **Listo para Reauditoría** |
+| **Alta** | 1 | `A1` | `[CERRADO]` |
+| **Media** | 3 | `A2`, `A3`, `A4` | `[CERRADO]` |
+| **Baja** | 2 | `A5`, `A6` | `[CERRADO]` |
+| **Total** | **6** | `A1`–`A6` | **APROBADO (6/6 cerrados, 0 hallazgos abiertos)** |
 
 ---
 
@@ -106,3 +106,23 @@
 - **Archivo y línea:** [README.md](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/README.md#L12)
 - **Escenario de falla:** En `tu-entrega/README.md:12` permanece el texto `*(se completa en Pasos 7–8)*` junto al enlace de `benchmark.ipynb`, contradiciendo la tabla de criterios en `README.md:100-101` y el propio archivo `benchmark.ipynb`, que ya cuenta con todas sus celdas ejecutadas y salidas guardadas.
 - **Corrección sugerida:** Eliminar `*(se completa en Pasos 7–8)*` de `tu-entrega/README.md:12`.
+
+---
+
+## 4. Reauditoría (Fase 4 — Argon)
+
+**Fecha de reauditoría:** 2026-11-17  
+**Alcance:** Revisión focalizada en los 6 hallazgos marcados como `[CORREGIDO]` (`A1`–`A6`).
+
+| ID | Severidad | Veredicto de Reauditoría | Evidencia verificada |
+|---|---|---|---|
+| `A1` | **Alta** | **`[CERRADO]`** | En [nucleo.py](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/s3util/nucleo.py#L74-L80), `subir()` captura `S3UploadFailedError`, inspecciona `exc.__cause__ or exc.__context__` y traduce `ClientError` (`NoSuchBucket`, `AccessDenied`/`403`) mediante `_traducir_client_error(..., "s3:PutObject", bucket, llave)` conservando el encadenamiento (`raise ... from exc`). Cubierto en [test_s3util.py](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/tests/test_s3util.py#L63-L96) (`test_listar_y_subir_bucket_no_existe` y `test_access_denied_en_existe_descargar_subir_y_listar_con_stubber`). Ejecución verificada: `9 passed, 4 deselected`. |
+| `A2` | **Media** | **`[CERRADO]`** | En [nucleo.py](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/s3util/nucleo.py#L51-L63), `_traducir_client_error` distingue `es_nivel_bucket = accion == "s3:ListBucket"` y construye `arn = f"arn:aws:s3:::{bucket}"`, reportando el prefijo por separado (`(prefijo='raw/')`). Verificado con `Stubber` en [test_s3util.py](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/tests/test_s3util.py#L98-L106). |
+| `A3` | **Media** | **`[CERRADO]`** | Árbol de trabajo de `s20-aws-s3-boto3` limpio (`git status --short` vacío) con 4 commits descriptivos en la rama `s20/preparacion` (`032731f`, `faeb2b0`, `730a77f`, `9784e30`). Re-ejecutado `gitleaks detect --source . --log-opts="--all -- s20-aws-s3-boto3"` (`8 commits scanned`, `~264.25 KB`, `no leaks found`) y evidenciado junto con `gitleaks dir` por carpeta/archivo en [README.md](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/README.md#L111-L146). |
+| `A4` | **Media** | **`[CERRADO]`** | Añadida la opción `--purgar-tmp` en [demo_paginacion.py](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/scripts/demo_paginacion.py#L50-L66) y pegada en [operaciones.md](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/operaciones.md#L119-L132) la salida real de `list-object-versions --prefix tmp/` mostrando `{"Versiones": 0, "DeleteMarkers": 0}` tras purgar las 2 408 entradas de prueba, con enlace desde [README.md](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/README.md#L151). |
+| `A5` | **Baja** | **`[CERRADO]`** | Reconciliadas §4 y §5 en [arquitectura_datalake.md](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/arquitectura_datalake.md#L161-L178): se documentan las 110 particiones reales (`1917–2026`), distinguiendo las 11 particiones clínicas recientes (`2016–2026`, `4.8–8.6 MiB`) de las 99 históricas (`1917–2015`, `3.4 KiB–1.8 MiB`) y vinculándolas con los tiempos medidos en DuckDB (`24.686 s` sin filtro vs. `0.144 s` con poda de partición). |
+| `A6` | **Baja** | **`[CERRADO]`** | Eliminada la nota provisional obsoleta en [README.md](file:///home/jorge/Documentos/data-sciences-labs/s20-aws-s3-boto3/tu-entrega/README.md#L12). |
+
+### Conclusión final
+No quedan hallazgos abiertos de ninguna severidad (`0` altos, `0` medios, `0` bajos). **El Laboratorio 20 (`s20-aws-s3-boto3`) queda formalmente cerrado y aprobado.**
+
