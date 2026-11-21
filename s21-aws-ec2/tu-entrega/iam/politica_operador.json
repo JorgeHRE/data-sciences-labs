@@ -1,0 +1,118 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LeerEC2SinRestriccion",
+      "Effect": "Allow",
+      "Action": ["ec2:Describe*", "ec2:GetConsoleOutput"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LanzarSoloTiposBaratosEnUsEast2",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:us-east-2:*:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:InstanceType": ["t3.micro", "t3.small", "t3.medium"]
+        }
+      }
+    },
+    {
+      "Sid": "LanzarSoloDiscoGp3PequenoEnUsEast2",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:us-east-2:*:volume/*",
+      "Condition": {
+        "StringEquals": { "ec2:VolumeType": "gp3" },
+        "NumericLessThanEquals": { "ec2:VolumeSize": "30" }
+      }
+    },
+    {
+      "Sid": "LanzarRecursosAuxiliaresEnUsEast2",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:aws:ec2:us-east-2::image/*",
+        "arn:aws:ec2:us-east-2:*:subnet/*",
+        "arn:aws:ec2:us-east-2:*:network-interface/*",
+        "arn:aws:ec2:us-east-2:*:security-group/*",
+        "arn:aws:ec2:us-east-2:*:key-pair/*",
+        "arn:aws:ec2:us-east-2:*:spot-instances-request/*"
+      ]
+    },
+    {
+      "Sid": "EtiquetarSoloAlLanzar",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": [
+        "arn:aws:ec2:us-east-2:*:instance/*",
+        "arn:aws:ec2:us-east-2:*:volume/*",
+        "arn:aws:ec2:us-east-2:*:spot-instances-request/*",
+        "arn:aws:ec2:us-east-2:*:security-group/*",
+        "arn:aws:ec2:us-east-2:*:key-pair/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": ["RunInstances", "CreateSecurityGroup", "CreateKeyPair"]
+        }
+      }
+    },
+    {
+      "Sid": "OperarInstanciasEnUsEast2",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StartInstances", "ec2:StopInstances", "ec2:RebootInstances",
+        "ec2:TerminateInstances", "ec2:ModifyInstanceMetadataOptions",
+        "ec2:CancelSpotInstanceRequests"
+      ],
+      "Resource": [
+        "arn:aws:ec2:us-east-2:*:instance/*",
+        "arn:aws:ec2:us-east-2:*:spot-instances-request/*"
+      ]
+    },
+    {
+      "Sid": "GestionarGruposDeSeguridadEnUsEast2",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress", "ec2:RevokeSecurityGroupIngress",
+        "ec2:ModifySecurityGroupRules"
+      ],
+      "Resource": [
+        "arn:aws:ec2:us-east-2:*:security-group/*",
+        "arn:aws:ec2:us-east-2:*:security-group-rule/*",
+        "arn:aws:ec2:us-east-2:*:vpc/*"
+      ]
+    },
+    {
+      "Sid": "GestionarLlavesSSHEnUsEast2",
+      "Effect": "Allow",
+      "Action": ["ec2:CreateKeyPair", "ec2:DeleteKeyPair"],
+      "Resource": "arn:aws:ec2:us-east-2:*:key-pair/*"
+    },
+    {
+      "Sid": "EntregarSoloRolesLab21SoloAEC2",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::*:role/lab21-*",
+      "Condition": { "StringEquals": { "iam:PassedToService": "ec2.amazonaws.com" } }
+    },
+    {
+      "Sid": "AlarmasCloudWatchEnUsEast2",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms"],
+      "Resource": "arn:aws:cloudwatch:us-east-2:*:alarm:*"
+    },
+    {
+      "Sid": "LeerMetricasYPrecios",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:DescribeAlarms", "cloudwatch:DescribeAlarmHistory",
+        "cloudwatch:GetMetricData", "cloudwatch:GetMetricStatistics",
+        "cloudwatch:ListMetrics", "pricing:GetProducts"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
