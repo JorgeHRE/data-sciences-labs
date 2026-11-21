@@ -63,3 +63,11 @@ s20-aws-s3-boto3/GUIA_ESTUDIO.md
 s20-aws-s3-boto3/tu-entrega/datos/
 s20-aws-s3-boto3/tu-entrega/*.parquet
 s20-aws-s3-boto3/tu-entrega/*.csv
+
+# Instrucciones del lab 21 (solo referencia local)
+s21-aws-ec2/ENUNCIADO.md
+
+# Llaves SSH y credenciales de AWS: nunca al repositorio (lab 21 en adelante)
+*.pem
+*.ppk
+credentials
