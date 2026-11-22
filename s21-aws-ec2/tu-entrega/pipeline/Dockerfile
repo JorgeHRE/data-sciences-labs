@@ -1,5 +1,5 @@
 # Imagen del pipeline auditoria_obs (lab 21). Construir DESDE LA RAÍZ DEL REPO:
-#   docker build -f s21-aws-ec2/tu-entrega/pipeline/Dockerfile -t auditoria-obs:0.2.0 .
+#   docker build -f s21-aws-ec2/tu-entrega/pipeline/Dockerfile -t auditoria-obs:0.2.1 .
 # El contexto es la raíz porque pyproject.toml instala clinlab por ruta desde s05.
 # Qué entra al contexto: Dockerfile.dockerignore (lista blanca), junto a este archivo.
 

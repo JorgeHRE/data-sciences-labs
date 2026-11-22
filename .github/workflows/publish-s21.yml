@@ -1,7 +1,7 @@
 # .github/workflows/publish-s21.yml
 # CI/CD de la imagen del pipeline del lab 21 (auditoria_obs).
 # - En un Pull Request: corre pytest y CONSTRUYE la imagen, pero no publica (valida el Dockerfile).
-# - Al mergear a main: lo mismo y además PUBLICA en ghcr.io con las etiquetas 0.2.0 y sha-xxxxxxx.
+# - Al mergear a main: lo mismo y además PUBLICA en ghcr.io con las etiquetas 0.2.1 y sha-xxxxxxx.
 name: Publish s21
 
 on:
@@ -49,7 +49,7 @@ jobs:
         with:
           images: ghcr.io/${{ env.REPO_OWNER }}/auditoria-obs
           tags: |
-            type=raw,value=0.2.0
+            type=raw,value=0.2.1
             type=sha,format=short
       - uses: docker/build-push-action@v6
         with:
