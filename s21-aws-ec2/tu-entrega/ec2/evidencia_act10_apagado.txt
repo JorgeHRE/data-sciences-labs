@@ -1,0 +1,21 @@
+# Evidencia actividad 10, parte 2: instancia terminada y nada encendido (2026-11-22T02:55:12Z)
+# (IDs de cuenta tapados.)
+
+# 1) Terminar la instancia (aws ec2 terminate-instances): estado previo -> estado actual
+i-02b9031d83a69fcd8  stopped -> terminated  (salida de la CLI al ejecutarlo, 2026-11-22T02:5x UTC)
+
+# 2) Estado final de la instancia
+i-02b9031d83a69fcd8	terminated
+
+# 3) us-east-2: recursos que cobran, contados con la CLI
+instancias pending/running/stopping/stopped: 0
+volumenes EBS:        0
+instantaneas propias: 0
+IPs elasticas:        0
+peticiones spot:      0
+
+# 4) Otras regiones: NO verificable. describe-instances devolvio error (acceso denegado) en las otras 16 regiones,
+#    probablemente por una politica de la organizacion que limita las regiones. Solo se comprobo us-east-2.
+#    Ejemplo: aws ec2 describe-instances --region us-east-1
+
+aws: [ERROR]: An error occurred (UnauthorizedOperation) when calling the DescribeInstances operation: You are not authorized to perform this operation. User: arn:aws:sts::<ID-CUENTA>:assumed-role/AccountFullAccessRole/<SESION> is n

@@ -1,0 +1,56 @@
+# Evidencia actividad 10, parte 1: la alarma apago la instancia sola (2026-11-22T02:52:16Z)
+# (Horas de la CLI en UTC-6 donde dice -06:00; IDs de cuenta tapados.)
+
+# 1) Configuracion de la alarma (aws cloudwatch describe-alarms)
+{
+    "nombre": "lab21-apagar-si-cpu-baja-1h",
+    "metrica": "CPUUtilization",
+    "estadistica": "Average",
+    "operador": "LessThanThreshold",
+    "umbral": 5.0,
+    "periodo_s": 300,
+    "periodos": 12,
+    "sin_datos": "notBreaching",
+    "acciones": [
+        "arn:aws:automate:us-east-2:ec2:stop"
+    ],
+    "dimensiones": [
+        {
+            "Name": "InstanceId",
+            "Value": "i-02b9031d83a69fcd8"
+        }
+    ]
+}
+
+# 2) Historial: de OK a ALARM y la accion de detener (aws cloudwatch describe-alarm-history)
+2026-11-21T20:51:51.336000-06:00	Action	Stop EC2 Instance 'i-02b9031d83a69fcd8' action completed successfully
+2026-11-21T20:51:50.816000-06:00	StateUpdate	Alarm updated from OK to ALARM
+2026-11-21T19:12:50.815000-06:00	StateUpdate	Alarm updated from INSUFFICIENT_DATA to OK
+2026-11-21T19:12:03.094000-06:00	ConfigurationUpdate	Alarm "lab21-apagar-si-cpu-baja-1h" created
+
+# 3) CPU promedio por periodo de 5 min; la alarma exige 12 seguidos < 5 (aws cloudwatch get-metric-statistics)
+2026-11-21T19:22:00-06:00  0.42 
+2026-11-21T19:27:00-06:00  0.40 
+2026-11-21T19:32:00-06:00  0.67 
+2026-11-21T19:37:00-06:00  0.41 
+2026-11-21T19:42:00-06:00  1.17 
+2026-11-21T19:47:00-06:00  5.40   <-- >= 5 (rompe la racha)
+2026-11-21T19:52:00-06:00  3.85 
+2026-11-21T19:57:00-06:00  0.90 
+2026-11-21T20:02:00-06:00  1.65 
+2026-11-21T20:07:00-06:00  0.60 
+2026-11-21T20:12:00-06:00  0.57 
+2026-11-21T20:17:00-06:00  0.49 
+2026-11-21T20:22:00-06:00  0.47 
+2026-11-21T20:27:00-06:00  0.45 
+2026-11-21T20:32:00-06:00  0.45 
+2026-11-21T20:37:00-06:00  0.44 
+2026-11-21T20:42:00-06:00  0.44 
+2026-11-21T20:47:00-06:00  0.48 
+
+# 4) Estado de la instancia tras la accion (aws ec2 describe-instances)
+{
+    "estado": "stopped",
+    "motivo": "User initiated (2026-11-22 02:51:51 GMT)",
+    "detalle": "Client.UserInitiatedShutdown: User initiated shutdown"
+}
