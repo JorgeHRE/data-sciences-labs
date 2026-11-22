@@ -1,0 +1,25 @@
+# Evidencia actividad 8: tmux y desconexion (instancia i-02b9031d83a69fcd8, 2026-11-22T02:19:10Z)
+# Secuencia: (1) se lanza el trabajo en tmux; (2) la conexion SSH se cierra; (3) 90+ s despues se abre una conexion nueva y se recupera la sesion.
+
+# 3) Conexion NUEVA, despues de la desconexion: ssh ... 'tmux ls'
+jupyter: 1 windows (created Sun Nov 22 02:04:59 2026)
+trabajo: 1 windows (created Sun Nov 22 02:17:08 2026)
+
+# El trabajo sigue vivo con el MISMO pid:
+33350 bash -c for i in $(seq 1 120); do echo "paso $i de 120
+33352 bash -c for i in $(seq 1 120); do echo "paso $i de 120
+33527 bash -c  tmux ls echo; echo "# El trabajo sigue vivo c
+
+# Primeras y ultimas lineas del log (el trabajo avanzo mientras no habia ninguna conexion):
+paso 1 de 120 | 02:17:08 UTC | pid 33350
+paso 2 de 120 | 02:17:13 UTC | pid 33350
+...
+paso 24 de 120 | 02:19:03 UTC | pid 33350
+paso 25 de 120 | 02:19:08 UTC | pid 33350
+
+# Lineas del log: 25 | pids distintos en el log: 1 (1 = nunca se reinicio)
+
+# Recuperar la sesion = tmux attach -t trabajo (interactivo). Pantalla actual vista con capture-pane:
+paso 23 de 120 | 02:18:58 UTC | pid 33350
+paso 24 de 120 | 02:19:03 UTC | pid 33350
+paso 25 de 120 | 02:19:08 UTC | pid 33350

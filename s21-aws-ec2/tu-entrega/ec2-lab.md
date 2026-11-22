@@ -208,7 +208,27 @@ Hay dos candados independientes: Jupyter solo escucha en localhost y el SG no ab
 **Nota de higiene:** el token de Jupyter queda en texto plano en `~/jupyter.log` de la instancia. Solo es útil a través del túnel y se destruye con la instancia en la actividad 10.
 
 ## 8. Trabajo que sobrevive a la desconexión (`tmux`)
-_Pendiente (actividad 8)._
+
+Salida completa: [ec2/evidencia_act8.txt](ec2/evidencia_act8.txt). Secuencia:
+
+```bash
+# 1) Lanzar el trabajo en una sesión de tmux llamada "trabajo" y salir (la conexión SSH se cierra)
+ssh -i ~/.ssh/lab21-ec2.pem ec2-user@<IP-PUBLICA> \
+  'tmux new-session -d -s trabajo "for i in \$(seq 1 120); do echo \"paso \$i de 120 | \$(date -u +%T) UTC | pid \$\$\"; sleep 5; done 2>&1 | tee ~/trabajo.log"'
+
+# 2) Sin ninguna conexión abierta, el trabajo sigue corriendo. Al volver (más de 90 s después):
+ssh -i ~/.ssh/lab21-ec2.pem ec2-user@<IP-PUBLICA>
+tmux ls                    # la sesión "trabajo" sigue ahí
+tmux attach -t trabajo     # recuperarla; se sale sin matarla con Ctrl+b y luego d
+```
+
+El trabajo es un contador de 120 pasos de 5 s que escribe una línea con la hora y su `pid` en `~/trabajo.log`.
+
+**Evidencia de que siguió:** al volver, la sesión `trabajo` existía y el log tenía 25 líneas continuas (de 02:17:08 a 02:19:08 UTC, una cada 5 s) con **un solo pid** (`33350`): el mismo proceso, sin reinicios, que avanzó mientras no había ninguna conexión abierta. En esa salida, `pgrep` muestra tres procesos: el trabajo (33350), su subshell del `tee` (33352) y el propio comando de la comprobación (33527), que coincide con el patrón.
+
+**Por qué funciona:** `tmux` corre los procesos bajo su propio servidor, en una sesión distinta a la de SSH. Al cerrarse la conexión, el sistema envía `SIGHUP` a los procesos de la sesión SSH, pero los de `tmux` no pertenecen a ella y siguen vivos. Es lo mismo que mantiene a Jupyter (sesión `jupyter`, actividad 7).
+
+**Cuándo importa:** un trabajo largo (una descarga, un entrenamiento, un pipeline) que un corte de wifi o un cierre de laptop mataría si corriera directo en la sesión SSH. Para trabajos que deben sobrevivir **a reinicios** de la máquina haría falta algo más (un servicio de `systemd`, o AWS Batch); `tmux` no sobrevive a un `stop` de la instancia.
 
 ## 9. Spot frente a on-demand
 _Pendiente (actividad 9)._
