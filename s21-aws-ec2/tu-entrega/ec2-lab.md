@@ -103,7 +103,7 @@ El script completo está en [ec2/user_data.sh](ec2/user_data.sh). `cloud-init` l
 
 1. Instala `docker`, `tmux` y `python3.12` con `dnf` (sin `dnf upgrade`, para que la máquina sea reproducible: la AMI fija la versión del repositorio).
 2. Activa Docker ahora y en cada reinicio, y mete a `ec2-user` en el grupo `docker` (así lo usa sin `sudo`).
-3. Descarga la imagen pública `ghcr.io/jorgehre/auditoria-obs:0.2.0` (pull anónimo: no hay ningún token en la máquina, D10).
+3. Descarga la imagen pública `ghcr.io/jorgehre/auditoria-obs:0.2.1` (pull anónimo: no hay ningún token en la máquina, D10). La primera instancia se lanzó con la `0.2.0`, y el log de evidencia es de esa corrida; la `0.2.1` corrige el fallo de la actividad 5 (D12), y es la que usa el script desde entonces (la instancia de spot de la actividad 9 ya la descarga sola).
 4. Crea un venv con JupyterLab 4.6.6, pandas 3.1.1 y pyarrow 26.0.1, de versiones fijas (D6). Aún no lo arranca: eso es la actividad 7.
 5. Escribe `~/LISTO.txt` con las versiones instaladas. Si ese archivo existe, el script terminó sin errores.
 

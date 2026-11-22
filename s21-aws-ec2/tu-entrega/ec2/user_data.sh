@@ -5,7 +5,7 @@
 # Regla del lab: si algo falla, se corrige ESTE archivo y se relanza; no se arregla a mano por SSH.
 set -euxo pipefail   # -e: se detiene al primer error; -x: imprime cada comando en el log
 
-IMAGEN="ghcr.io/jorgehre/auditoria-obs:0.2.0"
+IMAGEN="ghcr.io/jorgehre/auditoria-obs:0.2.1"
 
 # 1) Paquetes. Sin "dnf upgrade": AL2023 fija la versión del repositorio a la de la AMI (reproducible).
 #    docker: motor de contenedores | tmux: actividad 8 | python3.12: Jupyter (pandas 3 exige >= 3.11)
