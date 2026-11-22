@@ -29,7 +29,16 @@ def main() -> None:
 
     t0 = time.perf_counter()
     s3 = fs.S3FileSystem(region=a.region)
-    datos = ds.dataset(f"{a.bucket}/{a.entrada}", filesystem=s3, format="parquet", partitioning="hive")
+    # Se lista el prefijo CON barra final y se pasa la lista de archivos a Arrow. Si se pasa el
+    # directorio, pyarrow hace antes un HeadObject sobre la llave sin barra ("observations"), que
+    # no envía s3:prefix y por eso el rol de privilegio mínimo recibe 403 (D12).
+    base = f"{a.bucket}/{a.entrada.strip('/')}/"
+    archivos = sorted(
+        i.path for i in s3.get_file_info(fs.FileSelector(base, recursive=True))
+        if i.type == fs.FileType.File and i.path.endswith(".parquet")
+    )
+    # partition_base_dir: sin él, con una lista de archivos Arrow no sabe leer anio=XXXX de la ruta.
+    datos = ds.dataset(archivos, filesystem=s3, format="parquet", partitioning="hive", partition_base_dir=base)
     # El filtro se aplica en Arrow, antes de convertir a pandas: solo los 6 códigos llegan a memoria.
     tabla = datos.to_table(columns=COLUMNAS, filter=ds.field("CODE").isin(list(RANGOS)))
     obs = tabla.to_pandas()

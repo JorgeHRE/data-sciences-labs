@@ -1,6 +1,6 @@
 [project]
 name = "auditoria-obs"
-version = "0.2.0"
+version = "0.2.1"
 description = "Lab 21: auditoría de plausibilidad de observations (Synthea) de S3 a S3, reutilizando clinlab"
 requires-python = ">=3.12"
 # boto3 NO: pyarrow.fs trae su propio cliente S3 (AWS SDK C++); el código no lo importa.
