@@ -8,7 +8,7 @@ Por cada decisión: qué se decidió, qué alternativas había y por qué se eli
 | D2 | Tipo de instancia | **Decidida: `t3.small`, créditos `standard`** |
 | D3 | AMI (sistema operativo) | Pendiente |
 | D4 | Cómo llegan las credenciales del rol al contenedor (IMDSv2, *hop limit*) | Pendiente |
-| D5 | Alcance exacto de la política IAM | Pendiente |
+| D5 | Alcance exacto de la política IAM | **Decidida: A**, escritura solo en `results/auditoria_obs/*` |
 | D6 | Dónde corre Jupyter | Pendiente |
 | D7 | Qué es el "trabajo largo" de `tmux` | Pendiente |
 | D8 | Terminar o detener al final | Pendiente |
@@ -58,3 +58,9 @@ Hallazgos de la auditoría: no hay nulos, ni valores no numéricos, ni unidades 
 **Por qué:** si la imagen fuera privada en ghcr, la instancia necesitaría un token de GitHub, es decir, una credencial guardada en la máquina, contra el criterio principal del lab. Pública es aceptable porque la imagen contiene código, no datos: los datos están en S3 y solo los alcanza el rol. ECR queda como mejora documentada.
 
 Detalles de la imagen: *multi-stage* con `uv` y venv creado en `/app/.venv` (la misma ruta en las dos etapas), usuario `appuser` (uid 1000), solo `linux/amd64`, 609 MB (`pyarrow` ocupa 170 MB). Se quitó `boto3` porque el código no lo usa (`pyarrow.fs` trae su propio cliente S3), lo que ahorró 55 MB. Se verificó que la imagen no contiene `~/.aws`, ni variables `AWS_*`, ni llaves en `docker history`.
+
+## D5. Alcance del rol de la instancia (`lab21-instancia`)
+
+**Decisión:** solo la base que el pipeline necesita: `s3:ListBucket` sobre el bucket con la condición `s3:prefix` limitada a `curated/synthea/observations/*` y `results/auditoria_obs/*`; `s3:GetObject` en `curated/synthea/observations/*`; `s3:PutObject` en `results/auditoria_obs/*`. Es una política inline (vive y muere con el rol) y la confianza se limita a `ec2.amazonaws.com`.
+**Alternativas:** (B) añadir `AmazonSSMManagedInstanceCore` para Session Manager: rompe el "nada más" del enunciado, así que se deja para el bono como ampliación aparte; (C) `GetObject` en todo `curated/*`: viola "solo tu prefijo de datos". Para la escritura, `results/*` también cumplía el enunciado, pero se eligió `results/auditoria_obs/*` ("un rol, un trabajo": si el rol se filtra, no puede pisar resultados de otros pipelines).
+**Por qué:** es el privilegio mínimo real. El rol ni siquiera puede borrar sus propios resultados, y con el versionado del bucket una escritura maliciosa no destruye las corridas anteriores. `ListBucket` es necesario porque pyarrow lista los archivos y hace un `HeadObject` previo sobre la llave del prefijo: sin `ListBucket`, S3 responde 403 en lugar de 404 a una llave inexistente.

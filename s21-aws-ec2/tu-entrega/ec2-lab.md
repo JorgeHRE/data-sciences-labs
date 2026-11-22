@@ -19,7 +19,71 @@ Las decisiones están justificadas en [DECISIONES.md](./DECISIONES.md).
 **Tipo elegido: `t3.small` (2 vCPU, 2 GiB) con créditos `standard`.** `t3.micro` (1 GiB) no deja margen para unos 1.3 GiB. `c7i-flex.large` (4 GiB) cuesta 4 veces más ($0.0848 frente a $0.0208 por hora on-demand en `us-east-2`) para una memoria que no necesito. El trabajo es corto, así que no agota los créditos de CPU. Aun así elegí el modo `standard` (que frena) en lugar del `unlimited` por defecto (que cobra el excedente), para que el costo sea predecible. Detalle en [D2](./DECISIONES.md#d2-tipo-de-instancia).
 
 ## 2. Rol IAM de privilegio mínimo y evidencia del simulador
-_Pendiente (actividad 2)._
+
+Rol **`lab21-instancia`**, con un *instance profile* del mismo nombre (es lo que EC2 recibe en realidad). Ninguna política administrada: ni `AmazonS3FullAccess` ni ninguna otra. Decisión: [D5](./DECISIONES.md#d5-alcance-del-rol-de-la-instancia-lab21-instancia).
+
+**Confianza** ([iam/rol_confianza.json](./iam/rol_confianza.json)): solo el servicio `ec2.amazonaws.com` puede asumir el rol.
+
+**Permisos** (inline `s3-auditoria-obs`, [iam/rol_permisos.json](./iam/rol_permisos.json)):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListarSoloLosDosPrefijosDelPipeline",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::omop-tesis-jhr-2026",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["curated/synthea/observations/*", "results/auditoria_obs/*"]
+        }
+      }
+    },
+    {
+      "Sid": "LeerSoloObservations",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::omop-tesis-jhr-2026/curated/synthea/observations/*"
+    },
+    {
+      "Sid": "EscribirSoloResultadosDeEstePipeline",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::omop-tesis-jhr-2026/results/auditoria_obs/*"
+    }
+  ]
+}
+```
+
+`ListBucket` se aplica al **bucket** (ARN sin `/`) y se acota con `s3:prefix`; `GetObject` y `PutObject` se aplican a **objetos** (`…/prefijo/*`).
+
+### Evidencia del simulador
+
+**1. Política aislada (CLI, `simulate-custom-policy`)**, con [iam/simular_rol.sh](./iam/simular_rol.sh): 12/12 casos según lo esperado.
+
+| Debe poder | | No debe poder | |
+|---|---|---|---|
+| Listar `curated/synthea/observations/` | allowed | Listar la raíz del bucket | implicitDeny |
+| Leer un Parquet de `observations` | allowed | Listar `raw/` | implicitDeny |
+| Escribir en `results/auditoria_obs/…` | allowed | Leer `raw/…/patients.csv` (PII simulada) | implicitDeny |
+| Listar `results/auditoria_obs/` | allowed | Leer otra tabla de `curated/` | implicitDeny |
+| | | Escribir en `results/otro/` | implicitDeny |
+| | | Escribir en `curated/` (alterar la fuente) | implicitDeny |
+| | | Borrar un resultado | implicitDeny |
+| | | Leer otro bucket | implicitDeny |
+
+**2. El rol real en el simulador de la consola** (`policysim.aws.amazon.com`, rol `lab21-instancia`, **casilla "AWS Organizations SCPs" desmarcada**):
+
+- Permitido (GetObject en `observations/`, PutObject en `results/auditoria_obs/`): ![Simulador: casos permitidos](./capturas/simulador_rol_permitido.png)
+- Denegado (GetObject en `raw/…/patients.csv`, PutObject en `curated/…`): ![Simulador: casos denegados](./capturas/simulador_rol_denegado.png)
+
+En ambas capturas, la columna *Simulation Resource* dice `object`, es decir, se evaluaron los ARN escritos y no el comodín `*` por defecto. Un primer intento se descartó porque mostraba `*`: con el comodín, "allowed" no demuestra nada sobre un prefijo concreto. Con "Include Resource Policy" marcada, también se evalúa la política del bucket (solo HTTPS).
+
+**Por qué hay que desmarcar las SCP (el mismo hallazgo del lab 19).** La cuenta del Plan Gratuito por Proyectos pertenece a una organización de AWS Organizations gestionada por AWS. Con las SCP incluidas, el simulador responde `explicitDeny` con `AllowedByOrganizations: false` **a todo**, incluso a acciones que en la realidad funcionan: simulando a `jorge-labs`, `s3:GetObject` da `explicitDeny`, pero un `head-object` real devuelve el objeto. Es un falso negativo de la capa organizacional, que el simulador no puede evaluar desde una cuenta miembro (tampoco se pueden leer las SCP: `ListPoliciesForTarget` da `AccessDenied`). Por eso, `simulate-principal-policy` de la CLI, que siempre incluye las SCP, no sirve en esta cuenta.
+
+**3. Prueba real desde la instancia:** _pendiente (actividades 5 y 6)_. Es la prueba definitiva, porque atraviesa todas las capas, SCP incluidas.
 
 ## 3. Instancia y grupo de seguridad
 _Pendiente (actividad 3)._
