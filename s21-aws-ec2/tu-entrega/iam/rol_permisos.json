@@ -1,0 +1,28 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListarSoloLosDosPrefijosDelPipeline",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::omop-tesis-jhr-2026",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["curated/synthea/observations/*", "results/auditoria_obs/*"]
+        }
+      }
+    },
+    {
+      "Sid": "LeerSoloObservations",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::omop-tesis-jhr-2026/curated/synthea/observations/*"
+    },
+    {
+      "Sid": "EscribirSoloResultadosDeEstePipeline",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::omop-tesis-jhr-2026/results/auditoria_obs/*"
+    }
+  ]
+}
