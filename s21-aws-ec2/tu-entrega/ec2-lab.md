@@ -115,7 +115,36 @@ El script completo está en [ec2/user_data.sh](ec2/user_data.sh). `cloud-init` l
 **Evidencia:** [ec2/evidencia_user_data.txt](ec2/evidencia_user_data.txt), extraída de `/var/log/cloud-init-output.log`. Muestra cada comando ejecutado y `cloud-init status: done`, y confirma que terminó en 6.5 min sin errores (Docker 25.0.14, AWS CLI 2.38.0, tmux 3.6a, JupyterLab 4.6.6, imagen de 438 MB, disco 3.1 de 8 GB usados).
 
 ## 5. Ejecución del pipeline: de S3 a S3
-_Pendiente (actividad 5)._
+
+Se ejecutó dentro de la instancia, por SSH, con la imagen publicada y sin pasarle ninguna credencial:
+
+```bash
+docker run --rm ghcr.io/jorgehre/auditoria-obs:0.2.1
+```
+
+El contenedor obtiene las credenciales del rol `lab21-instancia` por IMDSv2 (por eso el *hop limit* es 2, D4). Salida completa en [ec2/evidencia_act5.txt](ec2/evidencia_act5.txt).
+
+| | En mi laptop (act. 1) | En la instancia |
+|---|---|---|
+| Filas leídas | 508 322 | 508 322 |
+| Implausibles / duplicados | 748 / 164 | 748 / 164 |
+| Tiempo del pipeline | 19–37 s | 9.8–10.4 s |
+
+Los resultados son idénticos, así que correr en la nube no cambió el análisis. Es más rápido porque la instancia está en la misma región que el bucket (`us-east-2`) y la lectura de S3 va por la red interna de AWS. La salida quedó en `s3://omop-tesis-jhr-2026/results/auditoria_obs/ejecucion=<sello>/auditoria.parquet` (614 filas × 10 columnas); cada corrida usa su propio prefijo y nunca pisa una anterior.
+
+**Pruebas del rol desde la instancia:**
+
+| Intento | Resultado | Qué demuestra |
+|---|---|---|
+| Leer `curated/synthea/observations/` y escribir en `results/auditoria_obs/` | permitido (el pipeline) | hace su trabajo |
+| `aws s3 ls` de `results/auditoria_obs/` | permitido | puede ver sus resultados |
+| `aws s3 ls` de `raw/` | `AccessDenied` (`s3:ListBucket`) | no ve datos crudos |
+| `aws s3 rm` de un resultado propio | `AccessDenied` (`s3:DeleteObject`) | puede escribir, no destruir |
+| Escribir en `results/otro/` | `AccessDenied` (`s3:PutObject`) | solo escribe en su prefijo |
+
+Esta es la prueba definitiva que quedó pendiente en §2: atraviesa todas las capas, incluidas las políticas de la organización, que el simulador no ve.
+
+**Un fallo en el camino (D12):** la primera corrida con la imagen `0.2.0` dio `AccessDenied` en un `HeadObject`. pyarrow consulta la llave `curated/synthea/observations` (sin barra) antes de listar, y esa consulta no envía `s3:prefix`, así que la condición de `ListBucket` no se cumple y S3 responde 403. Se corrigió el **código** (listar con barra final) y no la política, para no ampliar lo que el rol puede ver; de ahí la imagen `0.2.1`.
 
 ## 6. Demostración de que no hay credenciales en la máquina
 _Pendiente (actividad 6)._

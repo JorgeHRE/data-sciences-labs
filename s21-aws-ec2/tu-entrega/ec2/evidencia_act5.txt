@@ -1,0 +1,27 @@
+# Evidencia actividad 5 (instancia i-02b9031d83a69fcd8, rol lab21-instancia, 2026-11-22T01:57:07Z)
+# (El ID de la cuenta AWS se sustituyó por <ID-CUENTA>; el resto es la salida literal.)
+# Identidad con la que corre todo (viene del rol, no de credenciales guardadas):
+arn:aws:sts::<ID-CUENTA>:assumed-role/lab21-instancia/i-02b9031d83a69fcd8
+
+# 1) docker run ghcr.io/jorgehre/auditoria-obs:0.2.1  (sin variables de entorno ni volumenes con credenciales)
+Leídas 508,322 filas de s3://omop-tesis-jhr-2026/curated/synthea/observations/ (110 archivos)
+Escrito s3://omop-tesis-jhr-2026/results/auditoria_obs/ejecucion=20261122T015719Z/auditoria.parquet (614 filas x 10 columnas)
+Implausibles totales: 748 | duplicados: 164
+Tiempo total: 9.8 s
+
+# 2) PERMITIDO: aws s3 ls s3://omop-tesis-jhr-2026/results/auditoria_obs/
+
+real	0m12.225s
+user	0m0.000s
+sys	0m0.031s
+                           PRE ejecucion=20261122T015334Z/
+                           PRE ejecucion=20261122T015719Z/
+
+# 3) DENEGADO: aws s3 ls s3://omop-tesis-jhr-2026/raw/
+aws: [ERROR]: An error occurred (AccessDenied) when calling the ListObjectsV2 operation: User: arn:aws:sts::<ID-CUENTA>:assumed-role/lab21-instancia/i-02b9031d83a69fcd8 is not authorized to perform: s3:ListBucket on resource: "arn:aws:s3:::omop-tesis-jhr-2026" because no identity-based policy allows the s3:ListBucket action
+
+# 4) DENEGADO: borrar un resultado propio
+delete failed: s3://omop-tesis-jhr-2026/results/auditoria_obs/ejecucion=20261122T015719Z/auditoria.parquet An error occurred (AccessDenied) when calling the DeleteObject operation: User: arn:aws:sts::<ID-CUENTA>:assumed-role/lab21-instancia/i-02b9031d83a69fcd8 is not authorized to perform: s3:DeleteObject on resource: "arn:aws:s3:::omop-tesis-jhr-2026/results/auditoria_obs/ejecucion=20261122T015719Z/auditoria.parquet" because no identity-based policy allows the s3:DeleteObject action
+
+# 5) DENEGADO: escribir fuera de results/auditoria_obs/
+upload failed: - to s3://omop-tesis-jhr-2026/results/otro/prueba.txt An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:sts::<ID-CUENTA>:assumed-role/lab21-instancia/i-02b9031d83a69fcd8 is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::omop-tesis-jhr-2026/results/otro/prueba.txt" because no identity-based policy allows the s3:PutObject action
