@@ -12,6 +12,7 @@ Por cada decisión: qué se decidió, qué alternativas había y por qué se eli
 | D6 | Dónde corre Jupyter | Pendiente |
 | D7 | Qué es el "trabajo largo" de `tmux` | Pendiente |
 | D8 | Terminar o detener al final | Pendiente |
+| D10 | Cómo se construye y publica la imagen del pipeline | **Decidida: A** (GitHub Actions → ghcr público) |
 | D9 | Cómo obtiene el usuario humano (`jorge-labs`) permisos de EC2 y CloudWatch | **Decidida: B** |
 
 ---
@@ -49,3 +50,11 @@ Hallazgos de la auditoría: no hay nulos, ni valores no numéricos, ni unidades 
 **Decisión:** `t3.small` (2 vCPU, 2 GiB) con `CpuCredits=standard`.
 **Alternativas:** `t3.micro` (1 GiB: no cabe el pico de unos 1.3 GiB entre sistema, Docker y pipeline); `c7i-flex.large` (4 GiB, sin créditos de CPU, pero 4× más caro y requiere ampliar la política).
 **Por qué:** el pico medido del pipeline es de 0.80 GiB y la CPU trabaja menos de un minuto, así que los créditos no se agotan. Elegí `standard` en lugar del `unlimited` por defecto de los t3: si se agotan los créditos, la instancia se frena en vez de cobrar el excedente (unos $0.05 por vCPU-hora). Con un presupuesto de $5 prefiero un costo predecible.
+
+## D10. Construcción y publicación de la imagen `auditoria-obs:0.2.0`
+
+**Decisión:** un workflow `.github/workflows/publish-s21.yml` (con el patrón de la s06) que en cada PR corre pytest y construye la imagen sin publicarla, y al mergear a `main` publica `ghcr.io/jorgehre/auditoria-obs` con las etiquetas `0.2.0` y `sha-xxxxxxx`. La imagen es **pública**.
+**Alternativas:** (B) *push* manual desde la laptop: requiere crear y guardar un token personal (PAT) y la imagen no queda ligada a un commit; (C) Amazon ECR privado: lo más parecido a una pharma (el rol cubre el `pull`), pero exige repositorio, permisos de ECR y OIDC desde Actions.
+**Por qué:** si la imagen fuera privada en ghcr, la instancia necesitaría un token de GitHub, es decir, una credencial guardada en la máquina, contra el criterio principal del lab. Pública es aceptable porque la imagen contiene código, no datos: los datos están en S3 y solo los alcanza el rol. ECR queda como mejora documentada.
+
+Detalles de la imagen: *multi-stage* con `uv` y venv creado en `/app/.venv` (la misma ruta en las dos etapas), usuario `appuser` (uid 1000), solo `linux/amd64`, 609 MB (`pyarrow` ocupa 170 MB). Se quitó `boto3` porque el código no lo usa (`pyarrow.fs` trae su propio cliente S3), lo que ahorró 55 MB. Se verificó que la imagen no contiene `~/.aws`, ni variables `AWS_*`, ni llaves en `docker history`.
