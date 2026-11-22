@@ -147,7 +147,29 @@ Esta es la prueba definitiva que quedó pendiente en §2: atraviesa todas las ca
 **Un fallo en el camino (D12):** la primera corrida con la imagen `0.2.0` dio `AccessDenied` en un `HeadObject`. pyarrow consulta la llave `curated/synthea/observations` (sin barra) antes de listar, y esa consulta no envía `s3:prefix`, así que la condición de `ListBucket` no se cumple y S3 responde 403. Se corrigió el **código** (listar con barra final) y no la política, para no ampliar lo que el rol puede ver; de ahí la imagen `0.2.1`.
 
 ## 6. Demostración de que no hay credenciales en la máquina
-_Pendiente (actividad 6)._
+
+Salida completa, con el ID de cuenta sustituido por `<ID-CUENTA>`: [ec2/evidencia_act6.txt](ec2/evidencia_act6.txt).
+
+| Comprobación (dentro de la instancia) | Resultado |
+|---|---|
+| `~/.aws/credentials` y `~/.aws/config` | no existen (`~/.aws` solo tiene `cli/cache/session.db`) |
+| Variables de entorno `AWS_*` | ninguna |
+| Búsqueda de `AKIA…`, `ASIA…` y `aws_secret_access_key` en todo el home | 0 archivos |
+| Variables `AWS_*` dentro de la imagen del contenedor | 0 |
+| `aws sts get-caller-identity` | responde |
+
+```json
+{ "UserId": "AROA…:i-02b9031d83a69fcd8",
+  "Arn": "arn:aws:sts::<ID-CUENTA>:assumed-role/lab21-instancia/i-02b9031d83a69fcd8" }
+```
+
+El `Arn` es de un **rol asumido** (`assumed-role/lab21-instancia/…`), no de un usuario IAM (`user/…`), y el `UserId` empieza por `AROA` (rol), no por `AIDA` (usuario).
+
+**De dónde salen y por qué caducan:** la CLI y pyarrow las piden al servicio de metadatos de la instancia (IMDSv2, `169.254.169.254`), que obtiene de STS credenciales **temporales** del rol `lab21-instancia`; son de tipo `AWS-HMAC`, emitidas a las 01:50:06 UTC y con expiración a las 08:06:29 UTC (unas 6 horas), y AWS las renueva sola antes de que venzan. Una copia robada deja de servir cuando caduca, y no hay nada permanente que rotar o revocar.
+
+**Dos matices honestos:**
+- La búsqueda de llaves incluye los archivos binarios solo en la revisión de `session.db` (`grep -a`); la general usó `-I` y los omite. `session.db` es una base SQLite de la CLI con un identificador de sesión y de host, y 0 coincidencias de llaves.
+- `gitleaks` sobre el repositorio (214 commits) reporta 2 hallazgos, ambos **falsos positivos del lab 8** (un `pageToken` ya marcado `REDACTED` en `s08-apis-rest-consumo/.../act5_verificacion.txt`). No hay ninguna llave AWS ni nada del lab 21.
 
 ## 7. Jupyter por túnel SSH
 _Pendiente (actividad 7)._
