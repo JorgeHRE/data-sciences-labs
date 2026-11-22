@@ -1,0 +1,11 @@
+# Lista blanca para s21-aws-ec2/tu-entrega/pipeline/Dockerfile (contexto = raíz del repo).
+# Tiene prioridad sobre el .dockerignore de la raíz (que usa la s06). Gana la ÚLTIMA regla.
+*
+!s05-buenas-practicas-pytest/pyproject.toml
+!s05-buenas-practicas-pytest/src/
+!s21-aws-ec2/tu-entrega/pipeline/pyproject.toml
+!s21-aws-ec2/tu-entrega/pipeline/uv.lock
+!s21-aws-ec2/tu-entrega/pipeline/src/
+**/__pycache__
+**/*.pyc
+**/*.egg-info

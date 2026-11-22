@@ -1,0 +1,64 @@
+# .github/workflows/publish-s21.yml
+# CI/CD de la imagen del pipeline del lab 21 (auditoria_obs).
+# - En un Pull Request: corre pytest y CONSTRUYE la imagen, pero no publica (valida el Dockerfile).
+# - Al mergear a main: lo mismo y además PUBLICA en ghcr.io con las etiquetas 0.2.0 y sha-xxxxxxx.
+name: Publish s21
+
+on:
+  pull_request:
+    paths:
+      - "s21-aws-ec2/tu-entrega/pipeline/**"
+      - "s05-buenas-practicas-pytest/pyproject.toml"
+      - "s05-buenas-practicas-pytest/src/**"
+      - ".github/workflows/publish-s21.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "s21-aws-ec2/tu-entrega/pipeline/**"
+      - "s05-buenas-practicas-pytest/pyproject.toml"
+      - "s05-buenas-practicas-pytest/src/**"
+      - ".github/workflows/publish-s21.yml"
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    defaults: { run: { working-directory: s21-aws-ec2/tu-entrega/pipeline } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { version: "0.13.0", python-version: "3.12" }
+      # --frozen: si uv.lock no coincide con pyproject.toml, falla en vez de "arreglarlo" en silencio.
+      - run: uv sync --frozen
+      - run: uv run --frozen pytest -v
+
+  imagen:
+    needs: pruebas            # nunca se publica una imagen cuyo código no pasó las pruebas
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      # ghcr.io exige minúsculas y el usuario es JorgeHRE (misma trampa que en la s06).
+      - run: echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.REPO_OWNER }}/auditoria-obs
+          tags: |
+            type=raw,value=0.2.0
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .          # raíz: el pyproject instala clinlab por ruta desde s05
+          file: s21-aws-ec2/tu-entrega/pipeline/Dockerfile
+          platforms: linux/amd64   # t3 es x86; Graviton (arm64) solo si se hace el bono
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Caché entre corridas (salvedad pendiente del workflow de la s06).
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
