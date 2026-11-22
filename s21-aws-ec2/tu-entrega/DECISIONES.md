@@ -4,8 +4,8 @@ Por cada decisión: qué se decidió, qué alternativas había y por qué se eli
 
 | # | Decisión | Estado |
 |---|---|---|
-| D1 | Qué pipeline correr en el contenedor | Pendiente |
-| D2 | Tipo de instancia | Pendiente |
+| D1 | Qué pipeline correr en el contenedor | **Decidida: A** (auditoría con `clinlab`) |
+| D2 | Tipo de instancia | **Decidida: `t3.small`, créditos `standard`** |
 | D3 | AMI (sistema operativo) | Pendiente |
 | D4 | Cómo llegan las credenciales del rol al contenedor (IMDSv2, *hop limit*) | Pendiente |
 | D5 | Alcance exacto de la política IAM | Pendiente |
@@ -28,3 +28,24 @@ Por cada decisión: qué se decidió, qué alternativas había y por qué se eli
 - **Plan de la cuenta:** `FREE`, con $119.98 de créditos hasta 2027-05. Cost Explorer probablemente mostrará un costo neto de $0, así que habrá que reportar el costo bruto y los créditos aplicados.
 - **Tipos permitidos por el Plan Gratuito en `us-east-2`:** `t3`/`t8i` micro y small (x86, burstable), `t4g`/`t9g` micro y small (ARM), y `c7i-flex.large` (4 GiB) y `m7i-flex.large` (8 GiB), estos dos **no burstable**. `t3.medium` **no** está permitido.
 - **Precios por hora, Linux:** `t3.micro` $0.0104 on-demand / $0.0016 spot; `t3.small` $0.0208 / $0.0043; `t3.medium` $0.0416 / $0.0116 (spot más barato por zona, consultado el 2026-11-21).
+
+## D1. Qué pipeline corre en el contenedor
+
+**Decisión:** auditoría de plausibilidad de `observations` ([pipeline/](./pipeline/)) que reutiliza `clinlab` (s05): lee de `curated/synthea/observations/`, aplica `marcar_valores_implausibles` y `contar_duplicados` a 6 analitos y escribe una fila por (año, código) en `results/auditoria_obs/ejecucion=<sello UTC>/`.
+**Alternativas:** (B) eGFR con CKD-EPI: dos entradas, `patients` solo en `raw/` con PII simulada, y un JOIN; (C) agregados con DuckDB: no usa `clinlab`; (D) imagen 0.1.0 con un script montado: rompe la reproducibilidad.
+**Por qué:** es "mi" pipeline de verdad (código probado en la s05), tiene una sola entrada (rol mínimo sin tocar `raw/`) y su consumo de memoria es real, lo que hace que elegir instancia tenga sentido.
+
+Sub-decisiones tomadas con los datos a la vista (consultas de exploración del 2026-11-21):
+- **Solo sangre** para creatinina (`38483-4`) y glucosa (`2339-0`), sin `2160-0`/`2345-7` de suero: un código por analito y sin mezclar muestras bajo un mismo rango.
+- **Agrupar por `CODE`, nunca por `DESCRIPTION`:** `38483-4` y `2339-0` aparecen con dos descripciones cada uno.
+- **Rangos (inclusivos):** sistólica 50–250 mmHg; FC 30–220 /min; peso 0.5–300 kg (incluye recién nacidos: mínimo observado 1.8 kg); IMC 10–80; glucosa 20–600 mg/dL; creatinina 0.1–20 mg/dL. Son amplios a propósito, para buscar errores de dato y no pacientes enfermos (la idea de *plausibleValueLow/High* del DQD de OHDSI).
+- **Duplicados: contar y reportar, sin borrar (A).** Una auditoría no altera la fuente (trazabilidad, ALCOA). La alternativa B (borrarlos antes) cambiaba los denominadores y ocultaba el problema.
+- **Lectura y escritura con `pyarrow.fs.S3FileSystem` (A).** Lee directamente de S3 sin pasar por el disco y toma sola las credenciales del rol vía IMDS. Alternativas: `s3fs` (más dependencias en la imagen) y boto3 con `/tmp` (toca el disco de la instancia, contra el criterio de evaluación).
+
+Hallazgos de la auditoría: no hay nulos, ni valores no numéricos, ni unidades inconsistentes en los 6 códigos; no hay centinelas (los "99" contados son valores fisiológicos; ningún máximo llega a 999); 748 implausibles (719 creatininas > 20 mg/dL, con una mediana de 2.5 mg/dL, probablemente un artefacto de cómo Synthea simula la ERC; 29 sistólicas < 50); 164 duplicados exactos. Fuera de alcance, pero detectado: el eGFR `33914-3` viene con dos unidades (`mL/min/{1.73_m2}` y `mL/min`).
+
+## D2. Tipo de instancia
+
+**Decisión:** `t3.small` (2 vCPU, 2 GiB) con `CpuCredits=standard`.
+**Alternativas:** `t3.micro` (1 GiB: no cabe el pico de unos 1.3 GiB entre sistema, Docker y pipeline); `c7i-flex.large` (4 GiB, sin créditos de CPU, pero 4× más caro y requiere ampliar la política).
+**Por qué:** el pico medido del pipeline es de 0.80 GiB y la CPU trabaja menos de un minuto, así que los créditos no se agotan. Elegí `standard` en lugar del `unlimited` por defecto de los t3: si se agotan los créditos, la instancia se frena en vez de cobrar el excedente (unos $0.05 por vCPU-hora). Con un presupuesto de $5 prefiero un costo predecible.

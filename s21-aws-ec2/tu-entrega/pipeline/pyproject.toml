@@ -1,0 +1,17 @@
+[project]
+name = "auditoria-obs"
+version = "0.2.0"
+description = "Lab 21: auditoría de plausibilidad de observations (Synthea) de S3 a S3, reutilizando clinlab"
+requires-python = ">=3.12"
+dependencies = ["clinlab", "pandas", "pyarrow", "boto3"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+# clinlab se instala desde el código de la s05 (no se copia): una sola fuente de verdad.
+[tool.uv.sources]
+clinlab = { path = "../../../s05-buenas-practicas-pytest" }
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
