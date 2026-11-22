@@ -172,7 +172,40 @@ El `Arn` es de un **rol asumido** (`assumed-role/lab21-instancia/…`), no de un
 - `gitleaks` sobre el repositorio (214 commits) reporta 2 hallazgos, ambos **falsos positivos del lab 8** (un `pageToken` ya marcado `REDACTED` en `s08-apis-rest-consumo/.../act5_verificacion.txt`). No hay ninguna llave AWS ni nada del lab 21.
 
 ## 7. Jupyter por túnel SSH
-_Pendiente (actividad 7)._
+
+JupyterLab 4.6.6 (venv instalado por el `user data`, D6) se arrancó dentro de `tmux` y escucha **solo en `127.0.0.1:8888`**:
+
+```bash
+tmux new-session -d -s jupyter "~/jupyter-venv/bin/jupyter lab --no-browser --ip=127.0.0.1 --port=8888"
+```
+
+**El comando del túnel** (desde la laptop; `<IP-PUBLICA>` es la de la consola, y cambia al reiniciar la instancia):
+
+```bash
+ssh -i ~/.ssh/lab21-ec2.pem -N -L 8888:127.0.0.1:8888 ec2-user@<IP-PUBLICA>
+```
+
+- `-L 8888:127.0.0.1:8888`: el puerto 8888 de **mi laptop** (el primero) se conecta con el `127.0.0.1:8888` **de la instancia** (el segundo se interpreta allí, no en mi máquina). El navegador abre `http://127.0.0.1:8888` y el tráfico viaja cifrado dentro de la conexión SSH.
+- `-N`: no abre una shell, solo mantiene el túnel.
+
+![JupyterLab por el túnel: la barra muestra 127.0.0.1:8888 (token oculto)](capturas/jupyter_tunel.png)
+
+*El notebook lee 3 de los 110 archivos de `observations/` desde S3 con el rol de la instancia, sin credenciales en el código: `110 archivos; (1136, 10)`. La barra de direcciones muestra `127.0.0.1:8888`, no la IP pública.*
+
+**Jupyter nunca estuvo expuesto** ([ec2/evidencia_act7.txt](ec2/evidencia_act7.txt)):
+
+| Prueba | Resultado |
+|---|---|
+| `ss -ltn` en la instancia | `127.0.0.1:8888`, no `0.0.0.0` |
+| Reglas de entrada del SG | solo SSH 22 desde un `/32`; ninguna para el 8888 |
+| `curl` directo a la IP pública, sin túnel | *timeout* (curl sale con 28) |
+| `curl` a `127.0.0.1:8888` con el túnel abierto | `302`, responde |
+
+Hay dos candados independientes: Jupyter solo escucha en localhost y el SG no abre el puerto. Si falla uno, el otro lo cubre.
+
+**Un fallo en el camino:** la primera celda que probé leía un resultado de `results/auditoria_obs/` y dio `AccessDenied`. El rol puede **escribir** ahí (`PutObject`) pero no **leer** (`GetObject` solo existe sobre `observations/*`), el mismo diseño de solo anexar de la act. 5. No se amplió la política: la celda se cambió para leer la entrada, que sí está permitida.
+
+**Nota de higiene:** el token de Jupyter queda en texto plano en `~/jupyter.log` de la instancia. Solo es útil a través del túnel y se destruye con la instancia en la actividad 10.
 
 ## 8. Trabajo que sobrevive a la desconexión (`tmux`)
 _Pendiente (actividad 8)._

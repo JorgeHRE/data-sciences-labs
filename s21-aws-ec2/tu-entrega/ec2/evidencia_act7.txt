@@ -1,0 +1,14 @@
+# Evidencia actividad 7 (instancia i-02b9031d83a69fcd8, 2026-11-22T02:13:12Z)
+
+# 1) En la instancia: Jupyter solo escucha en localhost  (ss -ltn | grep 8888)
+LISTEN 0      128        127.0.0.1:8888       0.0.0.0:*   
+
+# 2) El grupo de seguridad no tiene ninguna regla para el 8888 (solo SSH 22 desde un /32): ver capturas/sg_inbound_rules.png
+
+# 3) Sin tunel, directo a la IP publica: el firewall descarta la conexion (timeout, curl sale con 28)
+codigo HTTP: 000
+codigo de salida de curl: 28
+
+# 4) Con el tunel abierto, desde la laptop: Jupyter responde (302 = redireccion a su pantalla de acceso)
+# tunel: ssh -i ~/.ssh/lab21-ec2.pem -N -L 8888:127.0.0.1:8888 ec2-user@<IP-PUBLICA-DE-LA-INSTANCIA>
+codigo HTTP: 302
