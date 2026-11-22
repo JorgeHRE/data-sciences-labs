@@ -1,0 +1,44 @@
+# Evidencia actividad 6 (instancia i-02b9031d83a69fcd8, 2026-11-22T02:01:00Z)
+# (El ID de la cuenta AWS se sustituyo por <ID-CUENTA>; del IMDS no se imprimen las llaves, solo los metadatos.)
+
+# 1) ~/.aws existe (la CLI crea cli/cache), pero NO hay credentials ni config
+total 0
+drwxrwxr-x. 3 ec2-user ec2-user  17 Nov 22 01:44 .
+drwx------. 5 ec2-user ec2-user 123 Nov 22 01:44 ..
+drwxrwxr-x. 3 ec2-user ec2-user  19 Nov 22 01:44 cli
+ls: cannot access '/home/ec2-user/.aws/credentials': No such file or directory
+
+# 2) No hay variables de entorno de AWS con llaves (se muestran solo los nombres)
+(fin: lo anterior son las variables AWS_* definidas; vacio = ninguna)
+
+# 3) Ningun archivo del home contiene una llave (AKIA... = usuario IAM, ASIA... = temporal, aws_secret_access_key)
+archivos con coincidencias: 0
+
+# 4) La imagen tampoco trae variables AWS
+0
+
+# 5) AUN ASI, la CLI responde, y lo que devuelve es el ROL, no un usuario
+{
+    "UserId": "AROA465VGLMM4JPHFVITW:i-02b9031d83a69fcd8",
+    "Account": "<ID-CUENTA>",
+    "Arn": "arn:aws:sts::<ID-CUENTA>:assumed-role/lab21-instancia/i-02b9031d83a69fcd8"
+}
+
+# 6) De donde salen: IMDSv2 (servicio de metadatos). Solo metadatos, sin llaves:
+rol: lab21-instancia
+{'Code': 'Success', 'Type': 'AWS-HMAC', 'LastUpdated': '2026-11-22T01:50:06Z', 'Expiration': '2026-11-22T08:06:29Z'}
+hora actual UTC: 2026-11-22T02:01:03Z
+
+# 7) Lo unico que hay bajo ~/.aws es la cache de la CLI; se revisa tambien con grep -a (que SI lee binarios)
+/home/ec2-user/.aws/cli/cache/session.db
+/home/ec2-user/.aws/cli/cache/session.db-wal
+/home/ec2-user/.aws/cli/cache/session.db-shm
+coincidencias de llaves en session.db: 0
+tabla session columnas ['key', 'session_id', 'timestamp']
+tabla host_id columnas ['key', 'id']
+
+# 8) Repositorio (laptop): gitleaks detect --source . (214 commits)
+8:01PM INF 214 commits scanned.
+8:01PM INF scanned ~10760061 bytes (10.76 MB) in 2.05s
+8:01PM WRN leaks found: 2
+# Los 2 hallazgos son falsos positivos del lab 8 (s08-.../act5_verificacion.txt: pageToken ya marcado REDACTED); ninguno es del lab 21 ni una llave AWS.
