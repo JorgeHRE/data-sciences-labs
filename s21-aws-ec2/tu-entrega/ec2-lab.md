@@ -231,7 +231,36 @@ El trabajo es un contador de 120 pasos de 5 s que escribe una línea con la hora
 **Cuándo importa:** un trabajo largo (una descarga, un entrenamiento, un pipeline) que un corte de wifi o un cierre de laptop mataría si corriera directo en la sesión SSH. Para trabajos que deben sobrevivir **a reinicios** de la máquina haría falta algo más (un servicio de `systemd`, o AWS Batch); `tmux` no sobrevive a un `stop` de la instancia.
 
 ## 9. Spot frente a on-demand
-_Pendiente (actividad 9)._
+
+Salida completa (IDs de cuenta, de organización y del principal tapados): [ec2/evidencia_act9.txt](ec2/evidencia_act9.txt).
+
+**Precios de `t3.small` Linux en `us-east-2`**, medidos con `describe-spot-price-history` y la API de precios:
+
+| | USD por hora | Frente al on-demand |
+|---|---|---|
+| On-demand | 0.0208 | 100 % |
+| Spot, zona `us-east-2c` (la de mi subred) | 0.0044 | 21 %, **unos 79 % menos** |
+| Spot, zona `us-east-2a` / `us-east-2b` | 0.0045 / 0.0056 | 22 % / 27 % |
+
+Con estos precios, una corrida de ~10 minutos costaría unos 0.0035 USD on-demand y unos 0.0007 USD en spot. A esta escala la diferencia es de fracciones de centavo; el ahorro importa cuando el trabajo es largo o se repite muchas veces.
+
+**No pude repetir el trabajo en una instancia spot: la organización lo bloquea.** El lanzamiento (`MarketType=spot`, petición `one-time`, `terminate`) fue denegado por una política de control de servicios (SCP) de la organización a la que pertenece la cuenta. Decodificando el mensaje de error, la regla es:
+
+```
+statementId: DenySpotMarket | efecto: DENY | acción: ec2:RunInstances
+condición:  ec2:InstanceMarketType = spot
+```
+
+La misma petición sin `MarketType=spot` (on-demand) **sí habría funcionado** (`DryRunOperation`: "Request would have succeeded"), así que el tipo, la zona, el disco y el rol no son el problema. Todas las pruebas fueron con `--dry-run`: no se creó ningún recurso, y no probé otras rutas para pedir spot, porque es un límite explícito de la organización y no un fallo (D13).
+
+**¿Tolera mi trabajo que me quiten la máquina con 2 minutos de aviso?**
+
+- **El pipeline, sí.** Dura unos 10 s, lee de S3 y escribe un archivo nuevo en un prefijo propio (`ejecucion=<sello>/`). Si se interrumpe a mitad, no queda un resultado a medias (S3 publica un objeto solo cuando la subida termina), y **reintentar es seguro** porque cada corrida crea su propio resultado y nunca pisa uno anterior. En rigor no es idempotente (cada reintento deja un resultado más, con otro sello de tiempo), sino *seguro de reintentar*: un reintento solo cuesta repetir el cálculo y deja una copia extra inofensiva.
+- **Jupyter y un trabajo largo en `tmux`, no.** Una interrupción spot con `terminate` borra el disco y la RAM, y con ello el notebook y el avance. Para eso haría falta guardar los resultados intermedios en S3 (*checkpoints*) y poder reanudar desde el último.
+- **Qué cambiaría para que sí lo tolerara** un trabajo largo: partirlo en pasos pequeños con salida a S3 por paso, hacer que cada paso compruebe si su resultado ya existe y se salte, y vigilar el aviso de interrupción de 2 minutos que publica IMDS para cerrar limpio.
+- **Por qué `one-time` y `terminate`:** `stop` e `hibernate` solo se admiten en peticiones persistentes, que se reabren solas y cobran el disco; en un laboratorio sin nadie vigilando eso es un riesgo de cobro sorpresa.
+
+**Conclusión:** spot es una buena opción para el pipeline (corto, idempotente, sin estado) y una mala opción para sesiones interactivas o trabajos sin *checkpoints*, donde el ahorro se pierde en tiempo repetido.
 
 ## 10. Alarma de apagado, evidencia de apagado y costo medido
 _Pendiente (actividad 10)._

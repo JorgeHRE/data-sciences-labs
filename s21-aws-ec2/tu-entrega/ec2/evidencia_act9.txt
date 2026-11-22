@@ -1,0 +1,24 @@
+# Evidencia actividad 9: spot frente a on-demand (2026-11-22T02:39:29Z)
+# (IDs de cuenta, de organizacion y del principal sustituidos por marcadores; el resto es salida literal.)
+
+# 1) Precio spot t3.small Linux en us-east-2, ultimo registrado por zona (aws ec2 describe-spot-price-history)
+us-east-2a	0.004500	2026-11-21T18:00:00+00:00
+us-east-2b	0.005600	2026-11-22T02:00:00+00:00
+us-east-2c	0.004400	2026-11-22T02:00:00+00:00
+
+# 2) Precio on-demand t3.small Linux, Ohio (aws pricing get-products)
+{'USD por hora': '0.0208000000'}
+
+# 3) Intento de lanzar el spot (run-instances --dry-run, misma peticion que la instancia original pero con MarketType=spot,one-time,terminate)
+aws: [ERROR]: An error occurred (UnauthorizedOperation) when calling the RunInstances operation: You are not authorized to perform this operation. User: arn:aws:sts::<ID-CUENTA>:assumed-role/AccountFullAccessRole/<SESION> is not authorized to perform: ec2:RunInstances on resource: arn:aws:ec2:us-east-2:<ID-CUENTA>:instance/* with an explicit deny in a service control policy: arn:aws:organizations::<ID-CUENTA>:policy/<ID-ORG>/service_control_policy/<ID-POLITICA>. 
+
+# 4) Mensaje decodificado (aws sts decode-authorization-message): la politica que niega
+statementId: DenySpotMarket | efecto: DENY
+acciones: ['ec2:RunInstances'] | recursos: ['*']
+condicion: [('ec2:InstanceMarketType', ['spot'])]
+accion pedida: RunInstances
+parametros de la peticion que no son el problema: tipo=t3.small, zona=us-east-2c; la condicion que coincide es ec2:InstanceMarketType = spot
+
+# 5) Contraste: la MISMA peticion sin MarketType=spot (on-demand) en --dry-run
+
+aws: [ERROR]: An error occurred (DryRunOperation) when calling the RunInstances operation: Request would have succeeded, but DryRun flag is set.

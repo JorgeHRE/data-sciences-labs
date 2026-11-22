@@ -94,3 +94,9 @@ Detalles de la imagen: *multi-stage* con `uv` y venv creado en `/app/.venv` (la 
 **Decisión:** corregir el código, no la política. El pipeline lista el prefijo con barra final (`FileSelector`) y pasa la lista de archivos a `ds.dataset` con `partition_base_dir`. Imagen nueva `0.2.1`.
 **Alternativas:** (A) quitar la condición `s3:prefix` de `ListBucket`: una línea y sin reconstruir, pero el rol listaría todas las llaves del bucket; (C) un segundo `ListBucket` sin condición: equivale a A en la práctica.
 **Por qué:** en la instancia, el rol funcionaba (`sts` mostraba `assumed-role/lab21-instancia`) y listar `observations/` también, pero pyarrow hace un `HeadObject` sobre `curated/synthea/observations` (sin barra) y este no envía `s3:prefix`, así que la condición no se cumple y S3 da 403. Debilitar el rol para acomodar un detalle de pyarrow iría contra el privilegio mínimo; la causa está en el código. Probado en local con un dataset hive de juguete (4 filas, columna `anio` recuperada) antes de reconstruir la imagen.
+
+## D13. Qué se hace con la actividad 9 si la organización bloquea spot
+
+**Decisión:** no lanzar la instancia spot; documentar la denegación (`DenySpotMarket`, una SCP de la organización) con el mensaje decodificado, y entregar la comparación de precios y el análisis de tolerancia a interrupciones.
+**Alternativas:** (B) pedir a quien administra la organización que levante la regla; (C) intentar otras rutas de la API para pedir spot (flotas, peticiones spot aparte).
+**Por qué:** la regla es un límite explícito de la organización, no un fallo que rodear; C sería esquivarlo y B no cambia el análisis. El enunciado acepta un "no" razonado. La actividad se hizo con el rol de administrador del proyecto (el único acceso por CLI, y no el operador `lab21-operador`), así que la evidencia de privilegio mínimo de §2 no cubre esta actividad; se usaron solo lecturas y `--dry-run`.
