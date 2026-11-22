@@ -82,3 +82,9 @@ Detalles de la imagen: *multi-stage* con `uv` y venv creado en `/app/.venv` (la 
 **Decisión:** JupyterLab 4.6.6 en un venv de `ec2-user` (Python 3.12), instalado por el `user data` y arrancado a mano solo en `127.0.0.1`; acceso por túnel SSH.
 **Alternativas:** (B) el contenedor oficial `scipy-notebook`, que añade unos 4–5 GB y obliga a pasar de 8 a unos 16 GB de disco; (C) añadir Jupyter a la imagen `auditoria-obs`, que mezcla una herramienta interactiva con la imagen de producción (contra la separación de la s06).
 **Por qué:** ocupa poco (venv de 546 MB, medido), arranca rápido y usa el rol directamente vía IMDS desde el host. Se probó la instalación en el contenedor `amazonlinux:2023` antes de lanzar, para no gastar un relanzamiento en un paquete inexistente.
+
+## D11. Cuándo se apaga sola la instancia (alarma de CloudWatch)
+
+**Decisión:** alarma `lab21-apagar-si-cpu-baja-1h`: CPU promedio < 5 % durante 12 periodos de 5 minutos seguidos (1 hora) → acción `stop` de la instancia.
+**Alternativas:** (B) 15–30 min: apaga rápido, pero un cálculo con pausas de lectura de S3 o una sesión de Jupyter en que se lee sin ejecutar nada la matarían a medias; (C) varias horas: más tolerante, pero deja correr una instancia olvidada por más tiempo (lo que la alarma quiere evitar); (D) apagar por hora fija o con un presupuesto: no distingue "trabajando" de "olvidada".
+**Por qué:** 1 h cubre las pausas normales del trabajo y limita el costo de un olvido a una hora de `t3.small`. Se usa `stop` y no `terminate`: el disco y la configuración se conservan y se puede reanudar (al reiniciar cambia la IP pública de la instancia, y hay que conectarse a la nueva; la regla `/32` no se toca, porque guarda mi IP de origen y no la de la instancia). La alarma tiene un límite: con la CPU en reposo `t3.small` ronda el 1–3 %, pero un proceso colgado que consuma CPU nunca la dispararía.

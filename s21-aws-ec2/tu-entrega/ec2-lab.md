@@ -86,10 +86,33 @@ En ambas capturas, la columna *Simulation Resource* dice `object`, es decir, se 
 **3. Prueba real desde la instancia:** _pendiente (actividades 5 y 6)_. Es la prueba definitiva, porque atraviesa todas las capas, SCP incluidas.
 
 ## 3. Instancia y grupo de seguridad
-_Pendiente (actividad 3)._
+
+**Instancia:** `i-02b9031d83a69fcd8`, `t3.small` con `CpuCredits=standard`, región `us-east-2` (zona `us-east-2c`). AMI Amazon Linux 2023 (`ami-0bdaca0026bed499d`, D3). Disco raíz de 8 GB `gp3`, cifrado y con `DeleteOnTermination`. Rol `lab21-instancia` por instance profile (actividad 2). IMDSv2 obligatorio con *hop limit* 2 (D4).
+
+**Grupo de seguridad:** `lab21-ssh-mi-ip` (`sg-01a648f8275af9e48`). Una sola regla de entrada: SSH (TCP 22) con origen **mi IP pública como `/32`**, es decir, una sola dirección, con la descripción `SSH-casa-2026-11-21`. No hay regla para el 8888 (Jupyter) ni para ningún otro puerto: Jupyter escucha solo en `127.0.0.1` y se alcanza por túnel SSH (D6). La salida queda abierta (valor por defecto) porque la instancia necesita llegar a S3, a ghcr.io y a los repositorios de `dnf`.
+
+![Reglas de entrada del grupo de seguridad (IP difuminada)](capturas/sg_inbound_rules.png)
+
+*La captura muestra la única regla de entrada del grupo `lab21-ssh-mi-ip`: SSH, TCP 22, origen un `/32` (difuminado a propósito) y la descripción `SSH-casa-2026-11-21`. No aparece `0.0.0.0/0`.*
+
+**Si cambia mi IP** (la de casa no es fija): SSH deja de responder (*timeout*, no "permission denied"). Se corrige editando el origen de la regla; no se abre el 22 al mundo.
 
 ## 4. Script de `user data`
-_Pendiente (actividad 4)._
+
+El script completo está en [ec2/user_data.sh](ec2/user_data.sh). `cloud-init` lo ejecuta **una sola vez**, como root, en el primer arranque. Hace cinco cosas, en orden:
+
+1. Instala `docker`, `tmux` y `python3.12` con `dnf` (sin `dnf upgrade`, para que la máquina sea reproducible: la AMI fija la versión del repositorio).
+2. Activa Docker ahora y en cada reinicio, y mete a `ec2-user` en el grupo `docker` (así lo usa sin `sudo`).
+3. Descarga la imagen pública `ghcr.io/jorgehre/auditoria-obs:0.2.0` (pull anónimo: no hay ningún token en la máquina, D10).
+4. Crea un venv con JupyterLab 4.6.6, pandas 3.1.1 y pyarrow 26.0.1, de versiones fijas (D6). Aún no lo arranca: eso es la actividad 7.
+5. Escribe `~/LISTO.txt` con las versiones instaladas. Si ese archivo existe, el script terminó sin errores.
+
+**Decisiones de diseño:**
+- `set -euxo pipefail`: `-e` detiene el script al primer error (sin eso, un `dnf` fallido pasaría inadvertido y el script "terminaría bien" con la máquina a medias); `-x` imprime cada comando en el log, y esa es la evidencia.
+- **Sin credenciales** en el script: el `user data` se puede leer desde la consola y desde IMDS. Los permisos los da el rol.
+- **Regla del lab:** si algo falla, se corrige este archivo y se relanza la instancia. No se arregla a mano por SSH, porque entonces la máquina deja de ser reproducible.
+
+**Evidencia:** [ec2/evidencia_user_data.txt](ec2/evidencia_user_data.txt), extraída de `/var/log/cloud-init-output.log`. Muestra cada comando ejecutado y `cloud-init status: done`, y confirma que terminó en 6.5 min sin errores (Docker 25.0.14, AWS CLI 2.38.0, tmux 3.6a, JupyterLab 4.6.6, imagen de 438 MB, disco 3.1 de 8 GB usados).
 
 ## 5. Ejecución del pipeline: de S3 a S3
 _Pendiente (actividad 5)._
