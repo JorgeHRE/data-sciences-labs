@@ -6,10 +6,10 @@ Por cada decisión: qué se decidió, qué alternativas había y por qué se eli
 |---|---|---|
 | D1 | Qué pipeline correr en el contenedor | **Decidida: A** (auditoría con `clinlab`) |
 | D2 | Tipo de instancia | **Decidida: `t3.small`, créditos `standard`** |
-| D3 | AMI (sistema operativo) | Pendiente |
-| D4 | Cómo llegan las credenciales del rol al contenedor (IMDSv2, *hop limit*) | Pendiente |
+| D3 | AMI (sistema operativo) | **Decidida: A** (Amazon Linux 2023) |
+| D4 | Cómo llegan las credenciales del rol al contenedor (IMDSv2, *hop limit*) | **Decidida: A** (IMDSv2 obligatorio, *hop limit* 2) |
 | D5 | Alcance exacto de la política IAM | **Decidida: A**, escritura solo en `results/auditoria_obs/*` |
-| D6 | Dónde corre Jupyter | Pendiente |
+| D6 | Dónde corre Jupyter | **Decidida: A** (venv en el host, solo en 127.0.0.1) |
 | D7 | Qué es el "trabajo largo" de `tmux` | Pendiente |
 | D8 | Terminar o detener al final | Pendiente |
 | D10 | Cómo se construye y publica la imagen del pipeline | **Decidida: A** (GitHub Actions → ghcr público) |
@@ -64,3 +64,27 @@ Detalles de la imagen: *multi-stage* con `uv` y venv creado en `/app/.venv` (la 
 **Decisión:** solo la base que el pipeline necesita: `s3:ListBucket` sobre el bucket con la condición `s3:prefix` limitada a `curated/synthea/observations/*` y `results/auditoria_obs/*`; `s3:GetObject` en `curated/synthea/observations/*`; `s3:PutObject` en `results/auditoria_obs/*`. Es una política inline (vive y muere con el rol) y la confianza se limita a `ec2.amazonaws.com`.
 **Alternativas:** (B) añadir `AmazonSSMManagedInstanceCore` para Session Manager: rompe el "nada más" del enunciado, así que se deja para el bono como ampliación aparte; (C) `GetObject` en todo `curated/*`: viola "solo tu prefijo de datos". Para la escritura, `results/*` también cumplía el enunciado, pero se eligió `results/auditoria_obs/*` ("un rol, un trabajo": si el rol se filtra, no puede pisar resultados de otros pipelines).
 **Por qué:** es el privilegio mínimo real. El rol ni siquiera puede borrar sus propios resultados, y con el versionado del bucket una escritura maliciosa no destruye las corridas anteriores. `ListBucket` es necesario porque pyarrow lista los archivos y hace un `HeadObject` previo sobre la llave del prefijo: sin `ListBucket`, S3 responde 403 en lugar de 404 a una llave inexistente.
+
+## D3. AMI
+
+**Decisión:** Amazon Linux 2023, x86_64 (`ami-0bdaca0026bed499d`, `al2023-ami-2023.12.20261120.0-kernel-6.12`, consultada el 2026-11-21).
+**Alternativas:** Ubuntu 24.04 (no trae AWS CLI; Docker necesita el repositorio oficial con llave GPG: unas 10–15 líneas más de `user data`); una AMI optimizada para ECS (trae Docker y vacía el objetivo de la actividad 4).
+**Por qué:** trae AWS CLI v2 (necesaria para `sts get-caller-identity` en la actividad 6) y el agente de SSM (bono); Docker se instala con `dnf` en 3 líneas. Un `user data` más corto tiene menos puntos de falla, y un fallo obliga a relanzar.
+
+## D4. IMDSv2 y *hop limit*
+
+**Decisión:** `HttpTokens=required`, `HttpPutResponseHopLimit=2`, `HttpEndpoint=enabled`, fijados de forma explícita al lanzar (coinciden con el valor por defecto de las AMI con `ImdsSupport=v2.0`, pero así quedan documentados).
+**Alternativas:** *hop limit* 1 con `--network host` (funciona, pero el contenedor pierde el aislamiento de red); *hop limit* 1 con la red normal (el contenedor no obtiene credenciales); IMDSv1 (vulnerable a SSRF, como en el caso Capital One 2019).
+**Por qué:** el puente de Docker es un salto de red más, así que el token de IMDSv2 necesita *hop limit* 2 para llegar al contenedor. Solo corre un contenedor en la máquina, así que se acepta que cualquier contenedor de la instancia pueda ver el rol. En una máquina compartida se usarían roles por tarea (ECS).
+
+## D6. Dónde corre Jupyter
+
+**Decisión:** JupyterLab 4.6.6 en un venv de `ec2-user` (Python 3.12), instalado por el `user data` y arrancado a mano solo en `127.0.0.1`; acceso por túnel SSH.
+**Alternativas:** (B) el contenedor oficial `scipy-notebook`, que añade unos 4–5 GB y obliga a pasar de 8 a unos 16 GB de disco; (C) añadir Jupyter a la imagen `auditoria-obs`, que mezcla una herramienta interactiva con la imagen de producción (contra la separación de la s06).
+**Por qué:** ocupa poco (venv de 546 MB, medido), arranca rápido y usa el rol directamente vía IMDS desde el host. Se probó la instalación en el contenedor `amazonlinux:2023` antes de lanzar, para no gastar un relanzamiento en un paquete inexistente.
+
+## D11. Cuándo se apaga sola la instancia (alarma de CloudWatch)
+
+**Decisión:** alarma `lab21-apagar-si-cpu-baja-1h`: CPU promedio < 5 % durante 12 periodos de 5 minutos seguidos (1 hora) → acción `stop` de la instancia.
+**Alternativas:** (B) 15–30 min: apaga rápido, pero un cálculo con pausas de lectura de S3 o una sesión de Jupyter en que se lee sin ejecutar nada la matarían a medias; (C) varias horas: más tolerante, pero deja correr una instancia olvidada por más tiempo (lo que la alarma quiere evitar); (D) apagar por hora fija o con un presupuesto: no distingue "trabajando" de "olvidada".
+**Por qué:** 1 h cubre las pausas normales del trabajo y limita el costo de un olvido a una hora de `t3.small`. Se usa `stop` y no `terminate`: el disco y la configuración se conservan y se puede reanudar (al reiniciar cambia la IP pública de la instancia, y hay que conectarse a la nueva; la regla `/32` no se toca, porque guarda mi IP de origen y no la de la instancia). La alarma tiene un límite: con la CPU en reposo `t3.small` ronda el 1–3 %, pero un proceso colgado que consuma CPU nunca la dispararía.

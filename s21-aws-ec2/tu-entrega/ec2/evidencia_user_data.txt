@@ -1,0 +1,50 @@
+# Evidencia actividad 4: extracto de /var/log/cloud-init-output.log (instancia i-02b9031d83a69fcd8, 2026-11-22)
+# Comando: sudo grep -E '^\+ ' /var/log/cloud-init-output.log  (cada comando que ejecutó el script, por set -x)
++ IMAGEN=ghcr.io/jorgehre/auditoria-obs:0.2.0
++ dnf install -y docker tmux python3.12 python3.12-pip
++ systemctl enable --now docker
++ usermod -aG docker ec2-user
++ docker pull ghcr.io/jorgehre/auditoria-obs:0.2.0
++ sudo -u ec2-user python3.12 -m venv /home/ec2-user/jupyter-venv
++ sudo -u ec2-user /home/ec2-user/jupyter-venv/bin/pip install --quiet --no-cache-dir jupyterlab==4.6.6 pandas==3.1.1 pyarrow==26.0.1
++ tee /home/ec2-user/LISTO.txt
++ echo 'user data terminado: 2026-11-22T01:18:27Z'
++ docker --version
++ aws --version
++ tmux -V
++ /home/ec2-user/jupyter-venv/bin/jupyter lab --version
++ sed 's/^/jupyterlab /'
++ docker image ls ghcr.io/jorgehre/auditoria-obs:0.2.0 --format 'imagen {{.Repository}}:{{.Tag}} {{.Size}}'
++ chown ec2-user:ec2-user /home/ec2-user/LISTO.txt
+
+# Fin del log:
+Docker version 25.0.14, build 0bab007
++ aws --version
+aws-cli/2.38.0 Python/3.9.25 Linux/6.12.115-140.210.amzn2023.x86_64 source/x86_64.amzn.2023
++ tmux -V
+tmux 3.6a
++ /home/ec2-user/jupyter-venv/bin/jupyter lab --version
++ sed 's/^/jupyterlab /'
+jupyterlab 4.6.6
++ docker image ls ghcr.io/jorgehre/auditoria-obs:0.2.0 --format 'imagen {{.Repository}}:{{.Tag}} {{.Size}}'
+imagen ghcr.io/jorgehre/auditoria-obs:0.2.0 438MB
++ chown ec2-user:ec2-user /home/ec2-user/LISTO.txt
+Cloud-init v. 22.2.2 finished at Sun, 22 Nov 2026 01:18:35 +0000. Datasource DataSourceEc2.  Up 396.71 seconds
+
+# cloud-init status --long:
+status: done
+time: Sun, 22 Nov 2026 01:18:35 +0000
+detail:
+DataSourceEc2
+
+# ~/LISTO.txt:
+user data terminado: 2026-11-22T01:18:27Z
+Docker version 25.0.14, build 0bab007
+aws-cli/2.38.0 Python/3.9.25 Linux/6.12.115-140.210.amzn2023.x86_64 source/x86_64.amzn.2023
+tmux 3.6a
+jupyterlab 4.6.6
+imagen ghcr.io/jorgehre/auditoria-obs:0.2.0 438MB
+
+# df -h /:
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p1  8.0G  3.1G  4.9G  39% /
