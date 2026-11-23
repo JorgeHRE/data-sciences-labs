@@ -263,19 +263,61 @@ La misma petición sin `MarketType=spot` (on-demand) **sí habría funcionado** 
 **Conclusión:** spot es una buena opción para el pipeline (corto, idempotente, sin estado) y una mala opción para sesiones interactivas o trabajos sin *checkpoints*, donde el ahorro se pierde en tiempo repetido.
 
 ## 10. Alarma de apagado, evidencia de apagado y costo medido
-_Pendiente (actividad 10)._
+### La alarma
+
+`lab21-apagar-si-cpu-baja-1h` (CloudWatch, `us-east-2`): promedio de `CPUUtilization` por periodo de 5 minutos, **menor que 5 %** durante **12 periodos seguidos** (una hora), y la acción es `arn:aws:automate:us-east-2:ec2:stop`. Los datos faltantes cuentan como "no incumple" (`notBreaching`). El razonamiento y las alternativas están en D11. La alarma **funcionó sola**: el 2026-11-21 a las 20:51:50 (hora local, 02:51:50 UTC del 22) pasó de `OK` a `ALARM` y la instancia se detuvo sin que yo interviniera. La configuración, el historial y la CPU por periodo están en [`ec2/evidencia_act10_alarma.txt`](ec2/evidencia_act10_alarma.txt).
+
+Su límite: **detener no es terminar.** La alarma deja de cobrar cómputo, pero el disco EBS y la IP siguen ahí. Por eso, después de que se disparó, **terminé la instancia a mano**.
+
+### Evidencia de que no queda nada encendido
+
+- La instancia `i-02b9031d83a69fcd8` pasó de `stopped` a `terminated` y, con `DeleteOnTermination`, se llevó el disco ([`ec2/evidencia_act10_apagado.txt`](ec2/evidencia_act10_apagado.txt)).
+- En `us-east-2` conté con la CLI **0 instancias activas, 0 volúmenes EBS, 0 instantáneas propias, 0 IP elásticas y 0 peticiones spot**.
+- Captura de la consola de EC2 con el panel de recursos de `us-east-2` en cero:
+
+![Consola de EC2 sin instancias ni volúmenes](capturas/nada_encendido.png)
+
+- **Lo que sí queda, y no cobra:** 1 par de llaves (`lab21-ec2`), 2 grupos de seguridad (`lab21-ssh-mi-ip` y el `default`), el rol `lab21-instancia`, la política `lab21-operador` y la propia alarma. Ningún par de llaves, grupo de seguridad ni recurso IAM tiene cargo. Los resultados en `results/auditoria_obs/` en S3 sí ocupan espacio, una fracción de centavo al día (0.0012 USD por día de almacenamiento en todo el bucket).
+- **Lo que no pude verificar:** las otras 16 regiones. `describe-instances` responde `UnauthorizedOperation` en todas, probablemente por una política de la organización que limita las regiones (es una suposición: no leí la política). Yo no lancé nada fuera de `us-east-2`, así que lo espero vacío, pero **no lo comprobé**.
+- Al terminar retiré de `jorge-labs` el permiso `IAMFullAccess`, que había necesitado para crear el rol y que equivale a ser administrador.
+
+### Costo real (Cost Explorer)
+
+Consulta del 2026-11-23, ventana del 21 al 22 de noviembre. Todo en USD; el detalle y los comandos están en [`ec2/evidencia_act10_costo.txt`](ec2/evidencia_act10_costo.txt).
+
+| Concepto | Bruto | Cómo se explica |
+|---|---:|---|
+| EC2: cómputo (`t3.small`) | 0.0346 | 1.665 h × 0.0208 USD/h (on-demand) |
+| VPC: IPv4 pública | 0.0084 | 0.005 USD/h × ~1.67 h |
+| EC2: disco `gp3` de 8 GB | 0.0015 | mientras existió la instancia |
+| S3 (almacenamiento y peticiones) | 0.0039 | todo el bucket, no solo este lab |
+| Cost Explorer (consultas a su API) | 0.0100 | 0.01 USD por consulta |
+| Secrets Manager | 0.0000 | no es de este lab |
+| **Total bruto** | **0.0584** | |
+| Créditos | −0.0584 | cubren el 100 % servicio por servicio |
+| **Neto (lo que se paga)** | **0.00** | |
+
+Tres cosas que importan al leer esta tabla:
+
+1. **Costo bruto y neto son cifras distintas y reporto las dos.** El neto es cero porque la cuenta tiene créditos; eso dice qué pagué yo, no cuánto cuesta el trabajo. El costo del trabajo es el bruto: **unos 0.0445 USD** lo que depende de la instancia (cómputo + IPv4 + disco), y 0.058 USD con S3 y Cost Explorer. Con el `Total` de Cost Explorer sin separar créditos habría puesto "0.00" y habría ocultado el dato útil.
+2. **La IP pública costó casi una cuarta parte del cómputo** (0.0084 frente a 0.0346). Desde 2024 AWS cobra cada IPv4 pública, esté o no en uso. En una instancia de 2 centavos la hora, la IP añade la cuarta parte del precio; en una flota de instancias pequeñas ese cargo fijo pesa.
+3. **Las consultas a Cost Explorer no son gratis:** la API cobra 0.01 USD por consulta. Medir el costo del laboratorio añadió su propio costo (0.01 USD el día 22, y las consultas de hoy aparecerán en el día 23). Los créditos también las cubren.
+
+**Cuadre con la estimación previa:** a mano había estimado ~0.045 USD para la instancia; Cost Explorer da 0.0445 (0.0346 + 0.0084 + 0.0015). La estimación sirvió para saber el orden de magnitud, y la cifra que reporto es la medida.
+
+**Advertencia sobre los datos:** Cost Explorer los marca `Estimated=true` y tarda unas 24 horas en reflejarlos. El día 21 tuvo solo costo de S3 (la instancia se lanzó el 22 UTC, 01:11 UTC, porque Cost Explorer agrupa por día UTC y mi hora local va seis horas detrás).
 
 ---
 
 ## Criterios de evaluación
 
-- [ ] Ninguna credencial de AWS está almacenada en la instancia (demostrado)
-- [ ] El puerto 22 no está abierto a `0.0.0.0/0`
-- [ ] Jupyter nunca estuvo expuesto a internet
-- [ ] El rol de instancia es de privilegio mínimo, no `AmazonS3FullAccess`
-- [ ] El `user data` deja la máquina lista sin intervención manual
-- [ ] El pipeline lee y escribe en S3, no en el disco de la instancia
-- [ ] La instancia quedó terminada o detenida al final
-- [ ] Hay una alarma de apagado automático configurada
-- [ ] El costo reportado viene de Cost Explorer, no de una estimación
-- [ ] Cero credenciales en el repositorio (`gitleaks` limpio)
+- [x] Ninguna credencial de AWS está almacenada en la instancia (demostrado) — §6
+- [x] El puerto 22 no está abierto a `0.0.0.0/0` — §3 y captura `sg_inbound_rules.png`
+- [x] Jupyter nunca estuvo expuesto a internet — §7 (escucha en `127.0.0.1`, solo túnel SSH) y D6
+- [x] El rol de instancia es de privilegio mínimo, no `AmazonS3FullAccess` — §2 (JSON y simulador) y D5
+- [x] El `user data` deja la máquina lista sin intervención manual — §4 y `ec2/evidencia_user_data.txt`
+- [x] El pipeline lee y escribe en S3, no en el disco de la instancia — §5 y `ec2/evidencia_act5.txt`
+- [x] La instancia quedó terminada o detenida al final — §10 (terminada; 0 recursos en `us-east-2`)
+- [x] Hay una alarma de apagado automático configurada — §10 (se disparó sola) y D11
+- [x] El costo reportado viene de Cost Explorer, no de una estimación — §10 y `ec2/evidencia_act10_costo.txt`
+- [x] Cero credenciales en el repositorio (`gitleaks` limpio) — §6: 0 hallazgos del lab 21; quedan 2 falsos positivos del lab 8, ya documentados

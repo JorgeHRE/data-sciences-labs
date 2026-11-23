@@ -1,0 +1,46 @@
+# Evidencia actividad 10, parte 3: costo real segun Cost Explorer (consultado 2026-11-23, region de la API: us-east-1)
+# La instancia corrio del 2026-11-22T01:11Z al 02:52Z (UTC). Ventana consultada: 2026-11-21 a 2026-11-23.
+# Todas las cifras son USD y salen de `aws ce get-cost-and-usage`; los datos vienen marcados Estimated=true
+# (Cost Explorer los da por provisionales hasta que cierra el ciclo de facturacion).
+
+# 1) Costo BRUTO por servicio (filtro RECORD_TYPE=Usage: lo que se habria cobrado sin creditos)
+aws ce get-cost-and-usage --time-period Start=2026-11-21,End=2026-11-24 --granularity DAILY \
+  --metrics UnblendedCost --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
+  --group-by Type=DIMENSION,Key=SERVICE
+2026-11-21  Amazon Simple Storage Service            0.001182
+2026-11-22  Amazon Elastic Compute Cloud - Compute   0.034638
+2026-11-22  Amazon Virtual Private Cloud             0.008350
+2026-11-22  EC2 - Other                              0.001510
+2026-11-22  Amazon Simple Storage Service            0.002704
+2026-11-22  AWS Cost Explorer                        0.010000
+2026-11-22  AWS Secrets Manager                      0.000005
+TOTAL BRUTO 2026-11-21: 0.001182   2026-11-22: 0.057206   suma: 0.058388
+
+# 2) Desglose por tipo de uso (mismo filtro, --group-by USAGE_TYPE), lo que explica cada renglon
+2026-11-22  USE2-BoxUsage:t3.small            0.034638   1.665278 h x 0.0208 USD/h (on-demand)
+2026-11-22  USE2-PublicIPv4:InUseAddress      0.008350   IPv4 publica en uso: 0.005 USD/h x ~1.67 h
+2026-11-22  USE2-EBS:VolumeUsage.gp3          0.001510   disco de 8 GB mientras existio
+2026-11-22  USE2-Requests-Tier1 / Tier2       0.001527   peticiones S3 (corridas, pruebas, listados)
+2026-11-21/22 USE2-TimedStorage-ByteHrs       0.001176 por dia  almacenamiento S3 del bucket (todo el bucket, no solo este lab)
+2026-11-22  USE1-APIRequest                   0.010000   consultas a la API de Cost Explorer (0.01 USD cada una)
+2026-11-22  USE2-AWSSecretsManagerAPIRequest  0.000005   no es de este lab
+
+# 3) Creditos (filtro RECORD_TYPE=Credit)
+2026-11-21  -0.001182
+2026-11-22  -0.057206
+TOTAL CREDITOS: -0.058388   (cubren el 100 % del bruto, servicio por servicio)
+
+# 4) Neto (lo que se paga): bruto + creditos
+aws ce get-cost-and-usage ... --group-by Type=DIMENSION,Key=SERVICE   (sin filtro: ya viene neto de creditos)
+Todos los servicios en 0, salvo residuos de ~1e-7 USD por redondeo.
+NETO = 0.00 USD
+
+# 5) Acumulado del mes (2026-11-01 a 2026-11-23, agrupado por RECORD_TYPE)
+Usage  0.0742619745
+Credit -0.0742619751
+Tax    0
+-> en lo que va de noviembre: bruto 0.0743 USD, neto 0.00 USD.
+
+# 6) Datos de la instancia que cuadran con el desglose
+USE2-BoxUsage:t3.small = 1.665278 h  (01:11Z a 02:52Z = 1 h 41 min = 1.68 h)
+Costo de computo por hora = 0.034638 / 1.665278 = 0.0208 USD/h, igual al precio on-demand de t3.small en us-east-2.
