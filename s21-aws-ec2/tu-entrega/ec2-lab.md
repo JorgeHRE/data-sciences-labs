@@ -307,6 +307,35 @@ Tres cosas que importan al leer esta tabla:
 
 **Advertencia sobre los datos:** Cost Explorer los marca `Estimated=true` y tarda unas 24 horas en reflejarlos. El día 21 tuvo solo costo de S3 (la instancia se lanzó el 22 UTC, 01:11 UTC, porque Cost Explorer agrupa por día UTC y mi hora local va seis horas detrás).
 
+## Bono: entrar con Session Manager, sin puerto 22
+
+Segunda instancia, lanzada solo para esta prueba y terminada al acabar (`t3.small`, AL2023, `us-east-2`). Decisión de permisos: [D14](./DECISIONES.md#d14-dónde-va-el-permiso-de-session-manager-bono). Evidencia completa: [`ec2/evidencia_bono_ssm.txt`](ec2/evidencia_bono_ssm.txt).
+
+**Qué cambia frente a la instancia principal:**
+
+| | Instancia principal (§3) | Instancia del bono |
+|---|---|---|
+| Entrada | SSH desde mi `/32` | **ninguna regla de entrada** |
+| Llave SSH | `lab21-ec2` | **ninguna** (`KeyName: null`) |
+| Rol | `lab21-instancia` (S3 acotado) | `lab21-instancia-ssm` (solo SSM, **sin S3**) |
+| Cómo entro | `ssh` | `aws ssm start-session --target <instancia>` |
+
+**Cómo funciona sin puerto de entrada:** el agente de SSM, que ya viene en Amazon Linux 2023, abre una conexión **hacia afuera** a Systems Manager y la mantiene. `start-session` no llega a la instancia, sino al servicio, que reenvía la sesión por esa conexión ya abierta. Por eso el grupo de seguridad solo necesita la regla de salida que ya trae.
+
+**Qué demostré (todo en la evidencia):**
+
+1. El agente se registró solo (`PingStatus: Online`) y `start-session` abrió una shell como `ssm-user`, con el grupo de seguridad con `Entrada: []`.
+2. Desde mi laptop, conectar al puerto 22 de la IP pública da *timeout*.
+3. **Una corrección a lo que esperaba:** dentro de la instancia `sshd` **sí escucha** en el 22. Lo que hace inalcanzable el puerto no es que el servicio esté apagado, sino que el grupo de seguridad no deja pasar nada. La defensa está en la red, no en el servicio.
+4. El rol `lab21-instancia-ssm` es `assumed-role/lab21-instancia-ssm` y no puede listar S3: ni `raw/` ni `results/auditoria_obs/`, que el rol del pipeline sí podía. Una primera prueba con un bucket inexistente devolvió `NoSuchBucket`, que no demuestra nada sobre permisos, y se repitió con el bucket real.
+5. La política `lab21-operador` v2 añade `ssm:StartSession` solo en `us-east-2` y solo con el documento `SSM-SessionManagerRunShell`, y permite cerrar o reanudar solo mis sesiones. El simulador (`iam/simular_operador.sh`) da 3 permitidos y 4 denegados, como se esperaba; entre los denegados está `SendCommand`.
+
+**Límites:**
+
+- Las sesiones las abrió el rol de administrador del proyecto (`AccountFullAccessRole`), no `jorge-labs`. Que la v2 baste para abrir una sesión real se comprobó con el simulador, no en la práctica; la SCP de la organización hace que el simulador contra el usuario real dé siempre `explicitDeny` (como en §2).
+- El costo de esta instancia (unos minutos de `t3.small`, IPv4 y 8 GB de disco) **aún no está medido en Cost Explorer**; los datos de hoy tardan en aparecer.
+- La instancia terminó y no quedó nada que cobre en `us-east-2`. Quedan sin cobro el grupo de seguridad `lab21-ssm-sin-entrada`, el rol y el *instance profile* `lab21-instancia-ssm` y la alarma `lab21-ssm-apagar-si-cpu-baja-1h`, que se borrarán con la limpieza final.
+
 ---
 
 ## Criterios de evaluación

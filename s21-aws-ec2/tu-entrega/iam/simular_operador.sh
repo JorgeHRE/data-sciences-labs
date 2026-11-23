@@ -41,3 +41,14 @@ sim "PassRole lab21-* a Lambda (deny)"       iam:PassRole arn:aws:iam::$A:role/l
 sim "PassRole rol admin a EC2 (deny)"        iam:PassRole arn:aws:iam::$A:role/AccountFullAccessRole $(srv ec2.amazonaws.com)
 sim "Crear alarma us-east-2 (allowed)"       cloudwatch:PutMetricAlarm arn:aws:cloudwatch:us-east-2:$A:alarm:x
 sim "Re-etiquetar instancia (deny)"          ec2:CreateTags "$I"
+
+echo "== Session Manager (bono)"
+uid() { echo "ContextKeyName=aws:userid,ContextKeyValues=AIDAYO,ContextKeyType=string"; }
+DOC=arn:aws:ssm:us-east-2::document/SSM-SessionManagerRunShell
+sim "StartSession instancia us-east-2 (allowed)" ssm:StartSession "$I"
+sim "StartSession documento shell us-east-2 (allowed)" ssm:StartSession "$DOC"
+sim "StartSession instancia us-east-1 (deny)"   ssm:StartSession "${I/us-east-2/us-east-1}"
+sim "StartSession con otro documento (deny)"    ssm:StartSession arn:aws:ssm:us-east-2::document/AWS-RunShellScript
+sim "Cerrar MI sesion (allowed)"                ssm:TerminateSession arn:aws:ssm:us-east-2:$A:session/AIDAYO-abc $(uid)
+sim "Cerrar sesion de OTRA persona (deny)"      ssm:TerminateSession arn:aws:ssm:us-east-2:$A:session/AIDAOTRO-abc $(uid)
+sim "Ejecutar comando remoto SendCommand (deny)" ssm:SendCommand "$I"

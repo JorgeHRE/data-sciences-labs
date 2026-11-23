@@ -113,6 +113,30 @@
         "cloudwatch:ListMetrics", "pricing:GetProducts"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "IniciarSesionSsmSoloEnUsEast2",
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": [
+        "arn:aws:ec2:us-east-2:*:instance/*",
+        "arn:aws:ssm:us-east-2::document/SSM-SessionManagerRunShell"
+      ]
+    },
+    {
+      "Sid": "CerrarOReanudarSoloMisSesionesSsm",
+      "Effect": "Allow",
+      "Action": ["ssm:TerminateSession", "ssm:ResumeSession"],
+      "Resource": "arn:aws:ssm:*:*:session/${aws:userid}-*"
+    },
+    {
+      "Sid": "LeerEstadoDeSsm",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:DescribeInstanceInformation", "ssm:DescribeSessions",
+        "ssm:GetConnectionStatus"
+      ],
+      "Resource": "*"
     }
   ]
 }

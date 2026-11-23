@@ -1,0 +1,127 @@
+# Evidencia bono: Session Manager sin puerto 22 (2026-11-23T14:53:32Z)
+# (IDs, cuenta y sesiones tapados. Instancia t3.small, AL2023, us-east-2, sin llave SSH, rol lab21-instancia-ssm.)
+
+# 1) Rol: una sola politica administrada, ninguna inline (aws iam)
+adjuntas: AmazonSSMManagedInstanceCore
+inline:   []
+
+# 2) Instancia sin llave SSH, IMDSv2 obligatorio, hop limit 1
+{
+    "KeyName": null,
+    "Perfil": "arn:aws:iam::<CUENTA>:instance-profile/lab21-instancia-ssm",
+    "IMDS": "required",
+    "Hop": 1,
+    "Tipo": "t3.small",
+    "Zona": "us-east-2c"
+}
+
+# 3) Grupo de seguridad: reglas de ENTRADA (esperado: ninguna)
+{
+    "Nombre": "lab21-ssm-sin-entrada",
+    "Entrada": [],
+    "Salida": [
+        {
+            "IpProtocol": "-1",
+            "UserIdGroupPairs": [],
+            "IpRanges": [
+                {
+                    "CidrIp": "0.0.0.0/0"
+                }
+            ],
+            "Ipv6Ranges": [],
+            "PrefixListIds": []
+        }
+    ]
+}
+
+# 4) El agente de SSM se registro solo (aws ssm describe-instance-information)
+{
+    "Ping": "Online",
+    "SO": "Amazon Linux",
+    "Agente": "3.3.5828.0"
+}
+
+# 5) Sesion 1: shell dentro de la instancia (aws ssm start-session)
+
+Starting session with SessionId: <SESION>
+sh-5.2$ whoami
+ssm-user
+sh-5.2$ echo "--- puertos TCP en escucha (22 = SSH):"
+--- puertos TCP en escucha (22 = SSH):
+sh-5.2$ ss -tlnH | awk '{print $4}'
+0.0.0.0:22
+[::]:22
+sh-5.2$ echo "--- sshd activo?"
+--- sshd activo?
+sh-5.2$ systemctl is-active sshd
+active
+sh-5.2$ echo "--- agente SSM:"
+--- agente SSM:
+sh-5.2$ systemctl is-active amazon-ssm-agent
+active
+sh-5.2$ echo "--- rol de la instancia (IMDSv2):"
+--- rol de la instancia (IMDSv2):
+sh-5.2$ T=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60'); curl -s -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/iam/security-credentials/; echo
+lab21-instancia-ssm
+sh-5.2$ exit
+exit
+
+
+Exiting session with sessionId: <SESION>.
+
+
+# 6) Desde mi laptop: conectar al puerto 22 de la IP publica de la instancia
+timeout 8 bash -c 'exec 3<>/dev/tcp/<IP-PUBLICA>/22'  ->  codigo 124 (timeout): nadie contesta, aunque sshd escucha por dentro (ver 5)
+
+# 7) Sesion 2: el rol de la instancia y la prueba con un bucket inexistente (NO es prueba de permisos: NoSuchBucket llega antes que la autorizacion)
+
+Starting session with SessionId: <SESION>
+sh-5.2$ aws sts get-caller-identity --query Arn --output text
+=arn:aws:sts::<CUENTA>:assumed-role/lab21-instancia-ssm/i-<id>
+>sh-5.2$ echo "--- leer S3 con este rol (espero AccessDenied):"
+--- leer S3 con este rol (espero AccessDenied):
+sh-5.2$ aws s3 ls s3:// 2>&1 | head -2
+
+aws: [ERROR]: An error occurred (AccessDenied) when calling the ListBuckets operation: User: arn:aws:sts::<CUENTA>:assumed-role/lab21-instancia-ssm/i-<id> is not authorized to perform: s3:ListAllMyBuckets because no identity-based policy allows the s3:ListAllMyBuckets action
+sh-5.2$ aws s3 ls s3://nada-que-ver-lab21/ 2>&1 | head -2
+
+aws: [ERROR]: An error occurred (NoSuchBucket) when calling the ListObjectsV2 operation: The specified bucket does not exist
+sh-5.2$ exit
+exit
+
+
+Exiting session with sessionId: <SESION>.
+
+
+# 8) Sesion 3: el rol no tiene S3 en absoluto (ni siquiera results/auditoria_obs/, que lab21-instancia si puede)
+
+Starting session with SessionId: <SESION>
+sh-5.2$ aws s3 ls s3://omop-tesis-jhr-2026/results/auditoria_obs/ 2>&1 | head -2 2
+
+aws: [ERROR]: An error occurred (AccessDenied) when calling the ListObjectsV2 operation: User: arn:aws:sts::<CUENTA>:assumed-role/lab21-instancia-ssm/i-<id> is not authorized to perform: s3:ListBucket on resource: "arn:aws:s3:::omop-tesis-jhr-2026" because no identity-based policy allows the s3:ListBucket action
+sh-5.2$ aws s3 ls s3://omop-tesis-jhr-2026/raw/ 2>&1 | head -2
+
+aws: [ERROR]: An error occurred (AccessDenied) when calling the ListObjectsV2 operation: User: arn:aws:sts::<CUENTA>:assumed-role/lab21-instancia-ssm/i-<id> is not authorized to perform: s3:ListBucket on resource: "arn:aws:s3:::omop-tesis-jhr-2026" because no identity-based policy allows the s3:ListBucket action
+sh-5.2$ exit
+exit
+
+
+Exiting session with sessionId: <SESION>.
+
+
+# 9) Cierre: instancia terminada y nada que cobre en us-east-2 (2026-11-23)
+running -> shutting-down -> terminated
+instancias pending/running/stopping/stopped: 0
+volumenes EBS: 0   instantaneas propias: 0   IPs elasticas: 0
+# Alarma lab21-ssm-apagar-si-cpu-baja-1h (CPU < 5 % durante 12 x 5 min -> stop) creada antes de abrir la primera sesion; no llego a disparar.
+
+# 10) Simulador de IAM con lab21-operador v2 (bash iam/simular_operador.sh), seccion "Session Manager"
+StartSession instancia us-east-2 (allowed)       allowed
+StartSession documento shell us-east-2 (allowed) allowed
+StartSession instancia us-east-1 (deny)          implicitDeny
+StartSession con otro documento (deny)           implicitDeny
+Cerrar MI sesion (allowed)                       allowed
+Cerrar sesion de OTRA persona (deny)             implicitDeny
+Ejecutar comando remoto SendCommand (deny)       implicitDeny
+# Limite: las sesiones de arriba las abrio el rol AccountFullAccessRole (admin), no jorge-labs. El simulador prueba que la
+# politica v2 PERMITE lo necesario y NIEGA lo demas, pero no se abrio una sesion real con jorge-labs.
